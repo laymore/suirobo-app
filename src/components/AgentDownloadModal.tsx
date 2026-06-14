@@ -107,31 +107,16 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setProgress(0);
 
     try {
-      const res = await fetch(v.download_url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const total = +(res.headers.get('content-length') || (v.size_bytes || 0));
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Stream not available');
-
-      const chunks: Uint8Array[] = [];
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        setProgress(Math.round((received / total) * 100));
-      }
-
-      const blob = new Blob(chunks, { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
+      // Direct download from GitHub Releases (reputable host) instead of a
+      // page-generated blob — Chrome no longer flags/deletes the file.
+      setProgress(100);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `suirobo-agent-v${v.version}.exe`;
+      a.href = v.download_url;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
 
-      // Đợi 1s rồi reset
       setTimeout(() => { setDownloading(null); setProgress(0); }, 1500);
     } catch (e: any) {
       alert('Download error: ' + e.message);
@@ -340,8 +325,8 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 📥 Installation
               </div>
               <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.7rem', color: '#475569', lineHeight: 1.8 }}>
-                <li>Download <code style={{ color: '#94a3b8' }}>suirobo-agent-v{current.version}.exe</code></li>
-                <li>Double-click → SmartScreen warning → "More info" → "Run anyway"</li>
+                <li>Download <code style={{ color: '#94a3b8' }}>suirobo-agent-v{current.version}.zip</code> → <strong>Extract All</strong></li>
+                <li>Double-click <code style={{ color: '#94a3b8' }}>suirobo-agent.exe</code> → SmartScreen → "More info" → "Run anyway"</li>
                 <li>Console window opens: <strong style={{ color: '#10b981' }}>Suirobo Agent — Team Autobots</strong></li>
                 <li>Agent installs to <code style={{ color: '#94a3b8' }}>%LOCALAPPDATA%\Suirobo</code> + auto-starts</li>
                 <li>Refresh the page → the agent auto-connects</li>

@@ -59,3 +59,18 @@ server/data/
 
 # Scratch
 *.output
+
+# Local-only dev/test/research files — gathered here, never pushed to git
+_dev/
+scratch/
+scratch_docs/
+# Defensive: standalone test/check/debug/sweep/fetch scripts (run via `npx tsx`)
+server/test_*.ts
+server/check_*.ts
+server/debug_*.ts
+server/sweep_*.ts
+server/fetch_*.ts
+server/publish_template_bots.ts
+server/skills_draft/
+test-e2e-*.cjs
+fetch_docs.js

@@ -167,30 +167,16 @@ const AgentDownloadPanel: React.FC<{ onAgentReady: () => void }> = ({ onAgentRea
     setDownloadPct(0);
 
     try {
-      const res = await fetch(manifest.download_url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const total = +(res.headers.get('content-length') || manifest.size_mb * 1024 * 1024);
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Stream unavailable');
-
-      const chunks: Uint8Array[] = [];
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        setDownloadPct(Math.round((received / total) * 100));
-      }
-
-      const blob = new Blob(chunks, { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
+      // Direct download straight from GitHub Releases (a reputable host). The browser
+      // fetches it natively, so Chrome no longer quarantines/deletes the file the way
+      // it did with the old page-generated blob from the low-reputation Walrus host.
+      setDownloadPct(100);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'suirobo-agent.exe';
+      a.href = manifest.download_url;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
       setDownloaded(true);
 
       // Sau khi download xong, poll agent mỗi 2s
@@ -287,8 +273,8 @@ const AgentDownloadPanel: React.FC<{ onAgentReady: () => void }> = ({ onAgentRea
             ✅ Download done — open the file to install
           </div>
           <div style={{ fontSize: '0.66rem', color: '#475569', lineHeight: 1.7 }}>
-            <div>1. Find the file <strong style={{ color: '#94a3b8' }}>suirobo-agent.exe</strong> in your Downloads folder</div>
-            <div>2. <strong style={{ color: '#94a3b8' }}>Double-click</strong> to run</div>
+            <div>1. Find <strong style={{ color: '#94a3b8' }}>suirobo-agent-v{manifest.version}.zip</strong> in Downloads → right-click → <strong>Extract All</strong></div>
+            <div>2. <strong style={{ color: '#94a3b8' }}>Double-click</strong> the extracted <strong style={{ color: '#94a3b8' }}>suirobo-agent.exe</strong></div>
             <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 5, padding: '6px 9px', margin: '4px 0', color: '#f59e0b' }}>
               ⚠️ Windows SmartScreen will warn because the .exe lacks an expensive EV cert.
               Click "<strong>More info</strong>" → "<strong>Run anyway</strong>".
