@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suirobo Skill Studio</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0e1a;color:#e2e8f0;font-family:'Inter',system-ui,sans-serif;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1f3a,#0f172a);border-bottom:1px solid #1e3a5f;padding:16px 24px;display:flex;align-items:center;gap:12px}
+.logo{font-size:24px;font-weight:800;background:linear-gradient(135deg,#38bdf8,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.subtitle{color:#64748b;font-size:13px}
+nav{display:flex;gap:4px;padding:16px 24px 0}
+.tab{padding:10px 20px;border:none;background:transparent;color:#64748b;cursor:pointer;border-radius:8px 8px 0 0;font-size:14px;font-weight:500;transition:.2s}
+.tab.active{background:#1e293b;color:#38bdf8;border-bottom:2px solid #38bdf8}
+.tab:hover:not(.active){color:#e2e8f0;background:#1a2035}
+.content{padding:24px;max-width:1200px;margin:0 auto}
+.panel{display:none}.panel.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;transition:.2s}
+.card:hover{border-color:#38bdf8;transform:translateY(-2px)}
+.card-name{font-weight:700;color:#38bdf8;font-size:16px;margin-bottom:6px}
+.card-desc{color:#94a3b8;font-size:13px;line-height:1.5}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;margin:4px 2px}
+.badge.builtin{background:#1e3a5f;color:#38bdf8}
+.badge.user{background:#1f2937;color:#818cf8}
+.badge.tag{background:#0f2b1f;color:#4ade80}
+.btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:.2s}
+.btn-primary{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-danger{background:#7f1d1d;color:#fca5a5}
+.btn-danger:hover{background:#991b1b}
+.btn-sm{padding:4px 10px;font-size:12px}
+.form-group{margin-bottom:16px}
+label{display:block;font-size:13px;font-weight:600;color:#94a3b8;margin-bottom:6px}
+input,textarea,select{width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none;transition:.2s;font-family:inherit}
+input:focus,textarea:focus{border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.1)}
+textarea{min-height:200px;resize:vertical;font-family:'Courier New',monospace;font-size:13px}
+.preview-box{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:16px;white-space:pre-wrap;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;min-height:200px;max-height:400px;overflow:auto}
+.alert{padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px}
+.alert-success{background:#064e3b;border:1px solid #059669;color:#6ee7b7}
+.alert-error{background:#7f1d1d;border:1px solid #dc2626;color:#fca5a5}
+.loading{color:#64748b;font-size:13px;text-align:center;padding:40px}
+.skill-detail{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-top:16px}
+.skill-detail pre{background:#0f172a;padding:16px;border-radius:8px;font-size:12px;overflow:auto;white-space:pre-wrap;color:#94a3b8}
+.section-title{font-size:18px;font-weight:700;margin-bottom:16px;color:#e2e8f0}
+.row{display:flex;gap:16px}
+.col{flex:1}
+.stat{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;text-align:center}
+.stat-num{font-size:32px;font-weight:800;color:#38bdf8}
+.stat-label{font-size:12px;color:#64748b;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="logo">🤖 SUIROBO Skill Studio</div>
+    <div class="subtitle">Quản lý AI Skills — Powered by Walrus + ADK</div>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+    <a href="/" class="btn btn-primary" style="text-decoration:none">💬 Playground</a>
+    <a href="/docs" class="btn" style="background:#1e293b;color:#94a3b8;text-decoration:none">📖 API Docs</a>
+  </div>
+</div>
+
+<nav>
+  <button class="tab active" onclick="showTab('skills')">📚 Skills</button>
+  <button class="tab" onclick="showTab('create')">✨ Tạo Skill</button>
+  <button class="tab" onclick="showTab('detail')">🔍 Chi tiết</button>
+</nav>
+
+<div class="content">
+  <!-- TAB: Skills List -->
+  <div id="tab-skills" class="panel active">
+    <div class="row" style="margin-bottom:24px">
+      <div class="col stat"><div class="stat-num" id="count-builtin">—</div><div class="stat-label">Built-in Skills</div></div>
+      <div class="col stat"><div class="stat-num" id="count-user">—</div><div class="stat-label">User Skills (Walrus)</div></div>
+    </div>
+    <div class="section-title">Built-in Skills</div>
+    <div class="grid" id="builtin-list"><div class="loading">Đang tải...</div></div>
+    <div class="section-title" style="margin-top:32px">🌐 User Skills (từ Walrus)</div>
+    <div class="grid" id="user-list"><div class="loading">Đang tải...</div></div>
+  </div>
+
+  <!-- TAB: Create Skill -->
+  <div id="tab-create" class="panel">
+    <div class="row">
+      <div class="col">
+        <div class="section-title">Tạo Skill mới</div>
+        <div id="create-alert"></div>
+        <div class="form-group">
+          <label>Tên skill (kebab-case) *</label>
+          <input id="s-name" placeholder="vd: sui-analytics" oninput="schedulePreview()">
+        </div>
+        <div class="form-group">
+          <label>Mô tả ngắn *</label>
+          <input id="s-desc" placeholder="Phân tích on-chain data và metrics" oninput="schedulePreview()">
+        </div>
+        <div class="form-group">
+          <label>Khả năng (mỗi dòng một điểm)</label>
+          <textarea id="s-caps" rows="4" placeholder="Phân tích volume giao dịch&#10;Theo dõi whale wallets&#10;Xuất báo cáo CSV" oninput="schedulePreview()"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Tools sử dụng (mỗi dòng một tool)</label>
+          <textarea id="s-tools" rows="3" placeholder="get_sui_balance(address)&#10;get_recent_transactions(address, limit)" oninput="schedulePreview()"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Nội dung SKILL.md đầy đủ (tùy chỉnh)</label>
+          <textarea id="s-content" rows="12" placeholder="Để trống để tự động generate từ các field trên..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Tags (phân cách bởi dấu phẩy)</label>
+          <input id="s-tags" placeholder="sui, analytics, defi">
+        </div>
+        <button class="btn btn-primary" onclick="createSkill()" style="width:100%">🚀 Upload lên Walrus</button>
+      </div>
+      <div class="col">
+        <div class="section-title">Preview SKILL.md</div>
+        <div class="preview-box" id="preview-box">Điền thông tin bên trái để xem preview...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: Detail -->
+  <div id="tab-detail" class="panel">
+    <div class="section-title">Chi tiết Skill</div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <input id="detail-name" placeholder="Nhập tên skill (vd: sui-balance)" style="flex:1">
+      <button class="btn btn-primary" onclick="loadDetail()">Xem</button>
+    </div>
+    <div id="detail-content" class="loading" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let previewTimer = null;
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const tabs = ['skills','create','detail'];
+    t.classList.toggle('active', tabs[i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'skills') loadSkills();
+}
+
+async function loadSkills() {
+  try {
+    const res = await fetch(`${API}/api/skills`);
+    const data = await res.json();
+    document.getElementById('count-builtin').textContent = data.total_builtin || 0;
+    document.getElementById('count-user').textContent = data.total_user || 0;
+    renderSkills('builtin-list', data.builtin_skills || [], 'builtin');
+    renderSkills('user-list', data.user_skills || [], 'user');
+  } catch(e) {
+    document.getElementById('builtin-list').innerHTML = `<div class="alert alert-error">Lỗi tải skills: ${e.message}</div>`;
+  }
+}
+
+function renderSkills(containerId, skills, type) {
+  const el = document.getElementById(containerId);
+  if (!skills.length) { el.innerHTML = '<div class="loading">Chưa có skill nào.</div>'; return; }
+  el.innerHTML = skills.map(s => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div class="card-name">📦 ${s.name}</div>
+        <span class="badge ${type}">${type === 'builtin' ? '🔒 Built-in' : '🌐 Walrus'}</span>
+      </div>
+      <div class="card-desc">${s.description || 'No description'}</div>
+      <div style="margin-top:10px">
+        ${(s.tags||[]).map(t => `<span class="badge tag">${t}</span>`).join('')}
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="viewSkill('${s.name}')">👁 Xem</button>
+        ${type === 'user' ? `<button class="btn btn-danger btn-sm" onclick="deleteSkill('${s.name}')">🗑 Xóa</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function viewSkill(name) {
+  document.getElementById('detail-name').value = name;
+  showTab('detail');
+  loadDetail();
+}
+
+async function loadDetail() {
+  const name = document.getElementById('detail-name').value.trim();
+  if (!name) return;
+  const el = document.getElementById('detail-content');
+  el.style.display = 'block';
+  el.innerHTML = '<div class="loading">Đang tải từ Walrus...</div>';
+  try {
+    const res = await fetch(`${API}/api/skills/${name}`);
+    const data = await res.json();
+    if (!res.ok) { el.innerHTML = `<div class="alert alert-error">${data.detail}</div>`; return; }
+    el.innerHTML = `<div class="skill-detail">
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <span class="badge ${data.type === 'builtin' ? 'builtin' : 'user'}">${data.type === 'builtin' ? '🔒 Built-in' : '🌐 Walrus'}</span>
+        ${data.blob_id ? `<span class="badge tag">blob: ${data.blob_id.slice(0,12)}...</span>` : ''}
+      </div>
+      <pre>${escapeHtml(data.content || '')}</pre>
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="alert alert-error">Lỗi: ${e.message}</div>`;
+  }
+}
+
+async function deleteSkill(name) {
+  if (!confirm(`Xóa skill "${name}" khỏi registry?`)) return;
+  try {
+    const res = await fetch(`${API}/api/skills/${name}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) loadSkills();
+    else alert(data.detail);
+  } catch(e) { alert(e.message); }
+}
+
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(generatePreview, 600);
+}
+
+async function generatePreview() {
+  const name = document.getElementById('s-name').value.trim();
+  const desc = document.getElementById('s-desc').value.trim();
+  const caps = document.getElementById('s-caps').value.trim();
+  const tools = document.getElementById('s-tools').value.trim();
+  if (!name || !desc) { document.getElementById('preview-box').textContent = 'Điền tên và mô tả để xem preview...'; return; }
+  try {
+    const url = `${API}/api/skills/preview/generate?name=${encodeURIComponent(name)}&description=${encodeURIComponent(desc)}&capabilities=${encodeURIComponent(caps)}&tools_used=${encodeURIComponent(tools)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    document.getElementById('preview-box').textContent = data.preview || '';
+    if (!document.getElementById('s-content').value)
+      document.getElementById('s-content').value = data.preview || '';
+  } catch(e) {}
+}
+
+async function createSkill() {
+  const name = document.getElementById('s-name').value.trim();
+  const desc = document.getElementById('s-desc').value.trim();
+  let content = document.getElementById('s-content').value.trim();
+  const tags = document.getElementById('s-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const alertEl = document.getElementById('create-alert');
+  if (!name || !desc) { alertEl.innerHTML = '<div class="alert alert-error">Vui lòng điền tên và mô tả.</div>'; return; }
+  if (!content) { await generatePreview(); content = document.getElementById('s-content').value.trim(); }
+  alertEl.innerHTML = '<div class="alert" style="background:#1e3a5f;color:#38bdf8">⏳ Đang upload lên Walrus...</div>';
+  try {
+    const res = await fetch(`${API}/api/skills/create`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, description: desc, content, tags })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alertEl.innerHTML = `<div class="alert alert-success">✅ Skill "<b>${name}</b>" đã upload lên Walrus! blob: ${data.skill?.blob_id?.slice(0,16)}...</div>`;
+      document.getElementById('s-name').value = '';
+      document.getElementById('s-desc').value = '';
+      document.getElementById('s-content').value = '';
+      document.getElementById('s-tags').value = '';
+      document.getElementById('preview-box').textContent = '';
+    } else {
+      alertEl.innerHTML = `<div class="alert alert-error">❌ ${data.detail}</div>`;
+    }
+  } catch(e) {
+    alertEl.innerHTML = `<div class="alert alert-error">❌ Lỗi: ${e.message}</div>`;
+  }
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Load on start
+loadSkills();
+</script>
+</body>
+</html>

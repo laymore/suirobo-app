@@ -1,0 +1,16 @@
+{
+  "name": "Suirobo Agent",
+  "publisher": "Team Autobots",
+  "version": "1.0.32",
+  "built_at": "2026-06-12T23:09:44.924Z",
+  "size_bytes": 64542346,
+  "size_mb": 61.55,
+  "sha256": "b177691280ccb85d3856cbbad62bd066468e21ae74fb5273ecb2188c9c10b2a9",
+  "platform": "win-x64",
+  "node_version": "node22",
+  "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
+  "download_url": "https://aggregator.walrus-mainnet.walrus.space/v1/blobs/pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
+  "published_at": "2026-06-12T23:11:01.016Z",
+  "epochs": 50,
+  "changelog": "New MTF bot skill: H4 Supertrend trend gate + M5 flip entries (+5.4%/mo avg Mar-Sep 2025 real data). HTF filter module for all signals."
+}

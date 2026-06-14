@@ -1,0 +1,68 @@
+[
+  {
+    "name": "auto_sl_tp_manager",
+    "skillId": "0x552ba4c89a282748e3b52870c596ef4f64e055df4cca00430db8f08012fdcfeb",
+    "digest": "GAkxQyF1TP6jajCxFr1SDh91XVjD5u5iw2MmARUyjKPQ",
+    "status": "ok"
+  },
+  {
+    "name": "deepbook_data_skill",
+    "skillId": "0x38731355c8b95fcae35b2b918f6d3078a595dde607f5ed052312ccedbdd5bfdf",
+    "digest": "4v9zGG9h42feRcAWm86kkDddr9xQimAgeeFNL3MJipnU",
+    "status": "ok"
+  },
+  {
+    "name": "margin_analyzer",
+    "skillId": "0x73ac59afd316a09401c5129a94c944f0142d9163e9a02033c3f80ec20c8d380c",
+    "digest": "8KVZGTSzFM4UzeytUfWXYsGJp1PcoE4uhvo4r5P8xJuP",
+    "status": "ok"
+  },
+  {
+    "name": "margin_entry_strategist",
+    "skillId": "0xb76c42e79e5e43ffe63e027a15da16d1c4258d7bfc3498d95c876640a8abef27",
+    "digest": "55JVJCgPD4Vw3PkVD8cgkAXEh5wW9miQfqYWifoNd8s8",
+    "status": "ok"
+  },
+  {
+    "name": "margin_portfolio_guardian",
+    "skillId": "0xf630f58c1d2c0256604aa854fc5ca9fcb73172ceb940cc1fd8353f7a0b2a0423",
+    "digest": "5HQruiRaQXDq7yjrMye5SnvfiaEJUwP3wK9ztcfmqjTx",
+    "status": "ok"
+  },
+  {
+    "name": "margin_risk_guard",
+    "skillId": "0x6609884c8892363096aa1e8847f5b1304d0d094e702382b1e8ba289f908a77a9",
+    "digest": "C37NhE6Rit6nyFHtG2TQJSQsdqjW4hMxeKNFSvt9izJJ",
+    "status": "ok"
+  },
+  {
+    "name": "predict_analyzer",
+    "skillId": "0xea56da8979638defe320d863e492d2d418fba74337d9e0f4c6b9c4c2798772e0",
+    "digest": "DFP7cY3DUV1DXKqiZo3cJsxFJi6j4wMpTsaaEBbA7PnN",
+    "status": "ok"
+  },
+  {
+    "name": "predict_multi_asset_allocator",
+    "skillId": "0x57873b5468115739fa9e30aa864cee456117a47ba2a79dca4cc66349ad52e4a2",
+    "digest": "DHu3mLJYfzk6z8bNrVFypaZ12fARxdBgmn3RxquVjVRy",
+    "status": "ok"
+  },
+  {
+    "name": "predict_opportunity_scanner",
+    "skillId": "0x7eb1e31d94574881125951d023fbda01982f1e4db838e0c79d8a9233f7db1e11",
+    "digest": "FcEVoR7SVRXodF6DS47qtGVtTvp4baQ2vSTauk75jxaz",
+    "status": "ok"
+  },
+  {
+    "name": "predict_position_monitor",
+    "skillId": "0x370804650d35a40d0406063a3132f96de371ee44d9da54b1f765473fb29ac7de",
+    "digest": "9xBE2fgbY6CysRN3iViAmXANJ7kTdDrxxkwyHGEtrykB",
+    "status": "ok"
+  },
+  {
+    "name": "token_analyzer",
+    "skillId": "0x859adc1158f00f2d6ec3136eef00e085e73d3e65d17aae9180afb3b5283d2d8f",
+    "digest": "GiJmpYy3ks7isPV3VyCXhPWsQawypv5k9HsQCDWtcAaL",
+    "status": "ok"
+  }
+]

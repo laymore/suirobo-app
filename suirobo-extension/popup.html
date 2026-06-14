@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      width: 280px; margin: 0; padding: 16px;
+      background: #0a0f1d; color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    h3 { margin: 0 0 8px; font-size: 14px; color: #10b981; }
+    .status { padding: 10px 12px; border-radius: 8px; margin-top: 10px; font-size: 12px; }
+    .ok    { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #22c55e; }
+    .err   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
+    .info  { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); color: #00d4ff; }
+    .small { font-size: 10px; color: #64748b; margin-top: 6px; line-height: 1.5; }
+    a { color: #00d4ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h3>🌉 Suirobo Agent Bridge</h3>
+  <div class="info">
+    Proxy HTTP localhost cho web HTTPS<br/>
+    Không cần accept self-signed cert
+  </div>
+
+  <div id="status" class="status info">⏳ Đang kiểm tra agent...</div>
+
+  <div class="small">
+    Bridge tự động kích hoạt khi mở <a href="https://autobots.wal.app" target="_blank">autobots.wal.app</a>.
+    <br/><br/>
+    Version: <span id="ver">-</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+# Sensitive files — KHÔNG commit
+.env
+.env.local
+.env.production
+server/bot_state.json
+server/state.json
+openclaw.json
+*.pem
+*.key
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+openclaw.local.json
+*.bak
+test-live-execute.ts
+test-live-borrow.ts
+test-live-repay.ts
+.memwal_account.json
+.memwal_store/
+
+# Agent binaries — distribute via GitHub Releases, NOT committed to the repo
+*.exe
+dist-agent/
+
+# Python agent virtualenv (huge) + caches
+agent/.venv/
+**/__pycache__/
+*.pyc
+
+# Self-signed dev certs (the *.key is already ignored above)
+certs/
+
+# Research datasets (large raw klines / sweep outputs; regenerate via server/fetch_*.ts).
+# NOTE: public/data/ IS kept — the frontend backtest loads it at runtime.
+server/data/
+
+# Scratch
+*.output

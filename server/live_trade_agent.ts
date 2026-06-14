@@ -1,0 +1,1065 @@
+/**
+ * Live Trade Agent — Bot Skill Engine
+ *
+ * Hai chế độ thực thi:
+ *
+ *  [A] AGENT MODE (mặc định)
+ *      Signal → POST /api/chat → Agent xây PTB → broadcast WS → Frontend ký
+ *
+ *  [B] DIRECT AUTONOMOUS MODE (directMode: true + privateKey)
+ *      Signal → xây PTB trực tiếp (DeepBook SDK) → ký keypair → execute Sui
+ *      ✅ Không cần Agent, không cần Frontend, không cần confirm
+ *      ⚠️  Private key phải được bảo vệ, KHÔNG lưu vào disk
+ */
+
+import 'dotenv/config';
+import { WebSocketServer, WebSocket } from 'ws';
+import fetch from 'node-fetch';
+import * as fsMod from 'fs';
+import * as pathMod from 'path';
+import * as httpsMod from 'https';
+import fs from 'fs';
+import path from 'path';
+import { Transaction } from '@mysten/sui/transactions';
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
+import { DeepBookClient } from '@mysten/deepbook-v3';
+import { detectLiveSignal, manageExit, inSession, calcMargin, type Candle, type IndicatorType, type ExitReason } from '../src/agent/backtestEngine.js';
+import { injectExecutionFee, injectBotOpenFee } from '../src/agent/tools/executionFee.js';
+import { buildOrderTx } from '../src/agent/tools/deeptrade_xbtc.js';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+export interface LiveBotConfig {
+  botSkillName:    string;
+  signal:          IndicatorType;
+  direction:       'both' | 'long_only' | 'short_only';
+  takeProfitPct:   number;
+  stopLossPct:     number;
+  trailingStopPct: number;
+  enableTrailing:  boolean;
+  enableDefense:   boolean;
+  leverage:        number;
+  orderPct:        number;
+  commission:      number;
+  timeframe:       string;
+  pair:            string;
+  capitalSUI:      number;   // vốn tính bằng SUI (để phù hợp với DeepBook margin)
+  walletAddress:   string;
+  // ── Agent mode ──
+  apiKey?:         string;
+  provider?:       'gemini' | 'deepseek' | 'openclaw';
+  sessionId?:      string;
+  // ── Direct autonomous mode ──
+  directMode?:     boolean;
+  privateKey?:     string;   // suiprivkey... hoặc hex — KHÔNG lưu disk
+  // ── DeepTrade spot (xBTC/USDC) ──
+  // Per-user objects from deeptrade_xbtc_setup. Required to place REAL DeepTrade orders.
+  balanceManagerId?: string;
+  feeManagerId?:     string;
+  // ── Supertrend EA inputs (ATR period + multiplier) ──
+  supertrendPeriod?: number;
+  supertrendMult?:   number;
+  // ── Range-breakout EA inputs ──
+  breakoutPeriod?:   number;   // Donchian lookback bars (default 20)
+  maxBarsInTrade?:   number;   // EA time-stop: force-close after N bars (0 = off)
+  // ── MTF trend filter (HTF Supertrend gates entry direction) ──
+  htfMinutes?:            number;   // e.g. 240 = H4
+  htfSupertrendPeriod?:   number;
+  htfSupertrendMult?:     number;
+  // ── EA money-management module (mirrors BacktestConfig — same names) ──
+  sizingMode?:          'fixed_pct' | 'risk_pct';
+  riskPct?:             number;
+  breakEvenTriggerPct?: number;
+  cooldownBars?:        number;
+  maxConsecLosses?:     number;
+  maxDailyLossPct?:     number;
+  sessionStartHour?:    number;
+  sessionEndHour?:      number;
+  // ── Bot skill author wallet (receives the 0.005 SUI author share per OPEN) ──
+  // No randomness — fee always goes to the author of the skill currently in use.
+  // Omit / empty string → fee is skipped entirely (e.g. self-built unpublished skill).
+  skillAuthor?: string;
+  // ── Optional AI safety check (off by default, $0 cost when off) ──
+  // When enabled, every bot signal is sent to an LLM for an extra approve/reject
+  // verdict BEFORE the server signs and executes. The bot still computes its own
+  // signal — the AI cannot create trades, only veto ones it considers unsafe.
+  aiValidation?: {
+    enabled:  boolean;
+    provider: 'gemini' | 'deepseek' | 'openclaw';
+    apiKey?:  string;     // openclaw reads from openclaw.json, no key needed here
+  };
+}
+
+export interface ActivePosition {
+  type:            'LONG' | 'SHORT';
+  entryPrice:      number;
+  entryTime:       string;
+  tpPrice:         number;
+  slPrice:         number;
+  trailPeak:       number;
+  beApplied?:      boolean;   // breakeven moved the SL to entry (EA module)
+  borrowAsset:     string;
+  borrowAmount:    number;
+  unrealizedPnl:   number;
+  unrealizedPct:   number;
+}
+
+export interface TradeLog {
+  id:    number;
+  time:  string;
+  type:  'info' | 'signal' | 'trade' | 'error' | 'warning';
+  msg:   string;
+  price?: number;
+  pnl?:   number;
+  txDigest?: string;
+}
+
+interface BotState {
+  active:         boolean;
+  config:         Omit<LiveBotConfig, 'privateKey'> | null; // ← privateKey KHÔNG bao giờ lưu vào state
+  position:       ActivePosition | null;
+  currentPrice:   number;
+  lastSignal:     'BUY' | 'SELL' | 'HOLD';
+  lastIndicators: { rsi: number; ema9: number; ema21: number; macdHist: number; bbUpper: number; bbLower: number };
+  tradeCount:     number;
+  totalPnl:       number;
+  logs:           TradeLog[];
+  lastUpdate:     string;
+  pollInterval:   number;
+  mode:           'agent' | 'direct';
+}
+
+// ─── State ─────────────────────────────────────────────────────────────────────
+
+const STATE_FILE = path.join(process.cwd(), 'server', 'bot_state.json');
+
+const state: BotState = {
+  active: false, config: null, position: null,
+  currentPrice: 0, lastSignal: 'HOLD',
+  lastIndicators: { rsi: 50, ema9: 0, ema21: 0, macdHist: 0, bbUpper: 0, bbLower: 0 },
+  tradeCount: 0, totalPnl: 0, logs: [],
+  lastUpdate: '', pollInterval: 30_000, mode: 'agent',
+};
+
+// Lưu riêng private key trong memory, không vào state
+// Ưu tiên: 1) Env var (dev key) → 2) UI input → 3) null
+let _cachedPrivateKey: string | null = process.env.SUIROBO_DEV_WALLET || null;
+
+// Log dev key đã load (chỉ address, không log key)
+if (_cachedPrivateKey) {
+  const devAddr = process.env.SUIROBO_DEV_ADDRESS || '(unknown address)';
+  console.log(`🔑 [Dev Wallet] Loaded from .env — Address: ${devAddr}`);
+}
+
+try {
+  if (fs.existsSync(STATE_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    state.position   = saved.position   ?? null;
+    state.tradeCount = saved.tradeCount ?? 0;
+    state.totalPnl   = saved.totalPnl   ?? 0;
+    state.config     = saved.config     ?? null;
+    state.mode       = saved.mode       ?? 'agent';
+  }
+} catch { /* ignore */ }
+
+function persistState() {
+  try {
+    // ⚠️  KHÔNG lưu privateKey vào disk
+    fs.writeFileSync(STATE_FILE, JSON.stringify({
+      position: state.position, tradeCount: state.tradeCount,
+      totalPnl: state.totalPnl, config: state.config, mode: state.mode,
+    }));
+  } catch { /* ignore */ }
+}
+
+// ─── Candles cache + Trade History ────────────────────────────────────────────
+// candlesCache: the latest klines fetched by tradingTick — exposed to the UI so
+// the Live Trade chart shows the EXACT data the bot trades on (no second feed).
+let candlesCache: Candle[] = [];
+
+export interface TradeRecord {
+  id:        number;
+  openTime:  string;        // ISO
+  closeTime: string | null; // ISO — null while the position is still open
+  side:      'LONG' | 'SHORT';
+  pair:      string;
+  entry:     number;
+  exit:      number | null;
+  pnlPct:    number | null; // leveraged %, set on close
+  pnlVal:    number | null;
+  reason:    string | null; // TP / SL / Trailing / Signal / Manual
+  openTx:    string | null;
+  closeTx:   string | null;
+  skill:     string;
+}
+
+const HISTORY_FILE = path.join(process.cwd(), 'server', 'trade_history.json');
+let tradeHistory: TradeRecord[] = [];
+let tradeRecId = 0;
+try {
+  if (fs.existsSync(HISTORY_FILE)) {
+    tradeHistory = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    tradeRecId = tradeHistory.reduce((m, r) => Math.max(m, r.id), 0);
+  }
+} catch { /* start empty */ }
+
+function persistHistory() {
+  try {
+    // Keep the file bounded — 500 most recent trades is plenty for the UI.
+    if (tradeHistory.length > 500) tradeHistory.length = 500;
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(tradeHistory));
+  } catch { /* ignore */ }
+}
+
+function recordOpen(side: 'LONG' | 'SHORT', entry: number, digest: string | null) {
+  const cfg = state.config as LiveBotConfig | null;
+  tradeHistory.unshift({
+    id: ++tradeRecId,
+    openTime: new Date().toISOString(), closeTime: null,
+    side, pair: cfg?.pair ?? '?', entry, exit: null,
+    pnlPct: null, pnlVal: null, reason: null,
+    openTx: digest, closeTx: null,
+    skill: cfg?.botSkillName ?? '?',
+  });
+  persistHistory();
+}
+
+function recordClose(exit: number, pnlPct: number, pnlVal: number, reason: string, digest: string | null) {
+  // Close the most recent record that's still open (LIFO — bot holds 1 position at a time).
+  const rec = tradeHistory.find(r => r.closeTime === null);
+  if (rec) {
+    rec.closeTime = new Date().toISOString();
+    rec.exit = exit; rec.pnlPct = pnlPct; rec.pnlVal = pnlVal;
+    rec.reason = reason; rec.closeTx = digest;
+    persistHistory();
+  }
+}
+
+let logId = 0;
+function addLog(type: TradeLog['type'], msg: string, price?: number, pnl?: number, txDigest?: string) {
+  const entry: TradeLog = { id: ++logId, time: new Date().toLocaleTimeString('vi-VN'), type, msg, price, pnl, txDigest };
+  state.logs.unshift(entry);
+  if (state.logs.length > 300) state.logs.length = 300;
+  console.log(`[LiveBot][${type.toUpperCase()}] ${msg}${txDigest ? ' | Tx: ' + txDigest.slice(0, 12) + '...' : ''}`);
+  return entry;
+}
+
+// ─── WebSocket ─────────────────────────────────────────────────────────────────
+
+// ws://localhost:8080 cho dev (HTTP web)
+const wss = new WebSocketServer({ port: 8080 });
+console.log('🔌 LiveBot WebSocket (ws)  on ws://localhost:8080  (dev)');
+
+// wss://localhost:8081 cho Walrus HTTPS web — sync vì pkg không support dynamic import
+(() => {
+  const DATA_ROOT2 = process.env.SUIROBO_DATA_DIR || process.cwd();
+  const certDir = pathMod.join(DATA_ROOT2, 'certs');
+  const certPath = pathMod.join(certDir, 'localhost.crt');
+  const keyPath = pathMod.join(certDir, 'localhost.key');
+
+  function startWss() {
+    if (!fsMod.existsSync(certPath) || !fsMod.existsSync(keyPath)) return false;
+    try {
+      const httpsServer = httpsMod.createServer({
+        cert: fsMod.readFileSync(certPath),
+        key:  fsMod.readFileSync(keyPath),
+      });
+      const wssSecure = new WebSocketServer({ server: httpsServer });
+      wssSecure.on('connection', (...args: any[]) => (wss as any).emit('connection', ...args));
+      httpsServer.listen(8081, () => {
+        console.log('🔒 LiveBot WebSocket (wss) on wss://localhost:8081 (HTTPS)');
+      });
+      return true;
+    } catch (e: any) {
+      console.warn('⚠️  WSS start failed:', e.message);
+      return false;
+    }
+  }
+
+  if (!startWss()) {
+    // Cert chưa có → retry mỗi 3s, tối đa 10 lần
+    let attempts = 0;
+    const retry = setInterval(() => {
+      if (startWss() || ++attempts >= 10) clearInterval(retry);
+    }, 3000);
+  }
+})();
+
+function broadcast(data: any) {
+  const msg = JSON.stringify(data);
+  wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
+}
+
+function broadcastState() {
+  broadcast({ type: 'BOT_STATE', ...state, logs: state.logs.slice(0, 80) });
+}
+
+wss.on('connection', ws => {
+  ws.send(JSON.stringify({ type: 'BOT_STATE', ...state, logs: state.logs.slice(0, 80) }));
+  ws.on('message', raw => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'TOGGLE_BOT')  { msg.active ? liveBotController.start() : liveBotController.stop(); }
+      if (msg.type === 'SET_CONFIG')  { liveBotController.configure(msg.config); }
+      if (msg.type === 'GET_STATE')   { broadcastState(); }
+      if (msg.type === 'TX_RESULT')   {
+        if (msg.success) addLog('trade', `✅ Tx confirmed | ${(msg.digest || '').slice(0, 12)}...`, undefined, undefined, msg.digest);
+        else { addLog('error', `❌ Tx failed: ${msg.error || 'unknown'}`); if (msg.intent === 'open') state.position = null; }
+        broadcastState();
+      }
+    } catch { /* ignore */ }
+  });
+});
+
+// ─── Binance Fetcher ──────────────────────────────────────────────────────────
+
+// Parse a pair into base/quote + the Binance symbol used for the price feed.
+// xBTC (DeepTrade wrapped BTC) tracks BTC price, so its feed maps to BTCUSDT.
+function pairAssets(pair: string): { base: string; quote: string; binanceSymbol: string } {
+  const norm = (pair || 'XBTC_USDC').toUpperCase().replace(/\//g, '_');
+  const [base, quote] = norm.includes('_') ? norm.split('_') : [norm.replace(/USDT|USDC$/,''), 'USDC'];
+  let feedBase = base;
+  if (base === 'XBTC' || base === 'WBTC' || base === 'BTC') feedBase = 'BTC';
+  // Binance price feed always quotes in USDT
+  const binanceSymbol = `${feedBase}USDT`;
+  return { base, quote, binanceSymbol };
+}
+
+// True for the xBTC/USDC market → routed to the real DeepTrade (DeepBook V3) order tool.
+function isXbtcPair(pair: string): boolean {
+  const { base, quote } = pairAssets(pair);
+  return base === 'XBTC' && quote === 'USDC';
+}
+
+async function fetchCandles(pair: string, tf: string, limit = 120): Promise<Candle[]> {
+  const symbol   = pairAssets(pair).binanceSymbol;
+  const interval = tf || '15m';
+  const url      = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+  const res  = await (fetch as any)(url);
+  const data = await res.json() as any[];
+  if (!Array.isArray(data)) throw new Error('Binance data invalid');
+  return data.map((k: any[]) => ({
+    date: new Date(k[0]).toISOString(),
+    open: parseFloat(k[1]), high: parseFloat(k[2]),
+    low:  parseFloat(k[3]), close: parseFloat(k[4]),
+    volume: parseFloat(k[5]),
+  }));
+}
+
+// ─── Sui Client (lazy-init) ───────────────────────────────────────────────────
+
+const MAINNET_RPC = 'https://fullnode.mainnet.sui.io';
+let _suiClient: SuiJsonRpcClient | null = null;
+function getSuiClient() {
+  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: MAINNET_RPC, network: 'mainnet' as any });
+  return _suiClient;
+}
+
+function getKeypair(privateKey: string): Ed25519Keypair {
+  try {
+    // suiprivkey... format
+    return Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(privateKey).secretKey);
+  } catch {
+    // hex format
+    return Ed25519Keypair.fromSecretKey(Buffer.from(privateKey.replace('0x', ''), 'hex'));
+  }
+}
+
+// ─── Direct Execution (Mode B) ────────────────────────────────────────────────
+
+async function signAndBroadcast(tx: Transaction, keypair: Ed25519Keypair): Promise<string> {
+  const suiClient = getSuiClient();
+  const gasPrice  = await suiClient.getReferenceGasPrice();
+  tx.setGasPrice(gasPrice);
+  tx.setGasBudget(60_000_000);
+  const built = await tx.build({ client: suiClient });
+  const { signature } = await keypair.signTransaction(built);
+  const res = await suiClient.executeTransactionBlock({
+    transactionBlock: built, signature,
+    options: { showEffects: true, showEvents: true },
+  });
+  if (res.effects?.status?.status !== 'success') {
+    throw new Error(`Tx failed: ${res.effects?.status?.error || 'unknown'}`);
+  }
+  return res.digest;
+}
+
+/**
+ * Build a DeepBookClient that already knows about the user's first margin manager.
+ * The SDK's marginManager.* helpers throw MARGIN_MANAGER_NOT_FOUND unless we
+ * pre-populate the marginManagers map — that's why the plain `new DeepBookClient`
+ * pattern fails on deposit/borrow/repay.
+ */
+async function getDbClientWithManager(address: string): Promise<{ dbClient: any; managerKey: string }> {
+  const suiClient = getSuiClient();
+  const discover = new DeepBookClient({ client: suiClient as any, network: 'mainnet', address });
+  const managerIds = await discover.getMarginManagerIdsForOwner(address);
+  if (!managerIds.length) throw new Error('No Margin Account on this wallet — create one first in Live Trade');
+
+  // The wallet may own MULTIPLE SUI/USDC managers (one per create click).
+  // Pick the BEST one — most liquid assets, no-debt preferred — instead of the
+  // first type-match, which could grab a stale account with locked collateral
+  // while the user's freshly-funded account sits unused.
+  const { pickBestSuiUsdcManager } = await import('../src/utils/marginDetail.js');
+  const managerKey = await pickBestSuiUsdcManager(suiClient, managerIds);
+  if (!managerKey) throw new Error('No SUI/USDC margin account on this wallet. Open one in Live Trade first.');
+
+  const poolKey = 'SUI_USDC';
+  const dbClient = new DeepBookClient({
+    client: suiClient as any, network: 'mainnet', address,
+    marginManagers: { [managerKey]: { marginManagerKey: managerKey, address: managerKey, poolKey } } as any,
+  });
+  return { dbClient, managerKey };
+}
+
+/**
+ * Inject a fresh Pyth price update into the tx BEFORE any margin moveCall.
+ * borrow / withdraw verify position health against the SUI + USDC feeds and
+ * abort with code 3 (EInvalidProof) when the on-chain price object is stale
+ * (older than ~30s). Same fix as the frontend's usePythOracle hook.
+ */
+async function injectPythUpdate(tx: Transaction): Promise<void> {
+  const { SuiPriceServiceConnection, SuiPythClient, mainnetPythConfigs, mainnetCoins } =
+    await import('@mysten/deepbook-v3');
+  const feeds = [(mainnetCoins as any).SUI.feed, (mainnetCoins as any).USDC.feed];
+  const connection = new SuiPriceServiceConnection('https://hermes.pyth.network');
+  const pythClient = new SuiPythClient(
+    getSuiClient() as any,
+    mainnetPythConfigs.pythStateId,
+    mainnetPythConfigs.wormholeStateId,
+  );
+  const updates = await connection.getPriceFeedsUpdateData(feeds);
+  if (!updates?.length) throw new Error('Pyth Hermes returned no price updates');
+  await pythClient.updatePriceFeeds(tx, updates, feeds);
+}
+
+async function directOpen(
+  keypair: Ed25519Keypair,
+  type: 'LONG' | 'SHORT',
+  borrowAmt: number,
+  skillAuthor?: string,
+): Promise<string> {
+  const address = keypair.toSuiAddress();
+  const { dbClient, managerKey } = await getDbClientWithManager(address);
+
+  const tx = new Transaction();
+  tx.setSender(address);
+
+  // Pyth price update MUST precede borrow (health check reads the feeds).
+  await injectPythUpdate(tx);
+
+  // LONG = borrowBase (SUI), SHORT = borrowQuote (USDC)
+  if (type === 'LONG') {
+    dbClient.marginManager.borrowBase(managerKey, borrowAmt)(tx);
+  } else {
+    dbClient.marginManager.borrowQuote(managerKey, borrowAmt)(tx);
+  }
+
+  // 0.01 SUI bot-skill open fee → 0.005 marketplace + 0.005 to the skill author.
+  // Deterministic: fee goes to the author of the skill currently in use (no randomness).
+  // Skipped if no author is set (e.g. self-built unpublished skill).
+  if (skillAuthor) injectBotOpenFee(tx, [skillAuthor]);
+
+  return signAndBroadcast(tx, keypair);
+}
+
+async function directClose(
+  keypair: Ed25519Keypair,
+  type: 'LONG' | 'SHORT',
+  repayAmt: number,
+): Promise<string> {
+  const address = keypair.toSuiAddress();
+  const { dbClient, managerKey } = await getDbClientWithManager(address);
+
+  const tx = new Transaction();
+  tx.setSender(address);
+
+  // Pyth update first — repay-side health accounting also reads the feeds.
+  await injectPythUpdate(tx);
+
+  // LONG = repayBase (SUI back), SHORT = repayQuote (USDC back)
+  if (type === 'LONG') {
+    dbClient.marginManager.repayBase(managerKey, repayAmt)(tx);
+  } else {
+    dbClient.marginManager.repayQuote(managerKey, repayAmt)(tx);
+  }
+
+  // Close is FREE — no bot-skill fee charged on exits.
+  return signAndBroadcast(tx, keypair);
+}
+
+// ─── Direct xBTC/USDC spot order (DeepTrade) — server-signed, no AI ────────────
+async function directXbtcOrder(
+  keypair: Ed25519Keypair,
+  side: 'buy' | 'sell',
+  price: number,
+  quantity: number,
+  balanceManagerId: string,
+  feeManagerId: string,
+  isOpening: boolean = true,   // true → charge 0.01 SUI bot fee; false (close) → free
+  skillAuthor?: string,        // who receives the 0.005 SUI author share
+): Promise<string> {
+  const address = keypair.toSuiAddress();
+  // Build the same DeepTrade market order the agent path builds, but sign it here.
+  const { tx } = await buildOrderTx({
+    walletAddress: address, side, price, quantity,
+    balanceManagerId, feeManagerId, marketOrder: true,
+  });
+  // Deterministic author fee: only when opening AND a skill author is set.
+  if (isOpening && skillAuthor) injectBotOpenFee(tx, [skillAuthor]);
+  return signAndBroadcast(tx, keypair);
+}
+
+// ─── Optional AI safety check ─────────────────────────────────────────────────
+// Sends the bot's pre-computed signal to an LLM and asks for a binary verdict.
+// The LLM cannot create or modify trades — only approve or reject. On any error
+// (timeout / parse failure / no key) we default to APPROVE so the AI layer can
+// never silently block trades the user already opted-in to.
+async function aiValidateSignal(
+  cfg: LiveBotConfig,
+  type: 'LONG' | 'SHORT',
+  price: number,
+  indicators: any,
+): Promise<{ approved: boolean; reason: string; confidence?: number }> {
+  const v = cfg.aiValidation;
+  if (!v?.enabled) return { approved: true, reason: 'AI check disabled' };
+
+  const prompt =
+    `You are a trading risk reviewer. The bot wants to open a ${type} position on ${cfg.pair} ` +
+    `at $${price} using strategy "${cfg.signal}" (${cfg.leverage}x leverage, TP ${cfg.takeProfitPct}%, SL ${cfg.stopLossPct}%). ` +
+    `Current indicators: RSI=${indicators?.rsi}, EMA9=${indicators?.ema9}, EMA21=${indicators?.ema21}, MACD_hist=${indicators?.macdHist}. ` +
+    `Reply with EXACTLY ONE LINE of JSON: {"approved": true|false, "confidence": 0-100, "reason": "<one short sentence>"}. ` +
+    `Approve unless you see a clear reason this trade is reckless given the indicators.`;
+
+  try {
+    const res = await (fetch as any)('http://localhost:3001/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: prompt,
+        sessionId: `aicheck-${Date.now()}`,
+        provider: v.provider,
+        apiKey:   v.apiKey || '',
+        walletAddress: cfg.walletAddress,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { approved: true, reason: `AI API ${res.status} — defaulting to approve` };
+    const body: any = await res.json();
+    const text: string = body.response || body.text || '';
+    const match = text.match(/\{[^}]*"approved"[^}]*\}/);
+    if (!match) return { approved: true, reason: 'AI reply unparseable — defaulting to approve' };
+    const verdict = JSON.parse(match[0]);
+    return {
+      approved:   !!verdict.approved,
+      reason:     String(verdict.reason || (verdict.approved ? 'approved' : 'rejected')),
+      confidence: typeof verdict.confidence === 'number' ? verdict.confidence : undefined,
+    };
+  } catch (e: any) {
+    return { approved: true, reason: `AI check error (${e.message}) — defaulting to approve` };
+  }
+}
+
+// ─── Agent Mode Caller (Mode A) ───────────────────────────────────────────────
+
+async function callAgent(cfg: LiveBotConfig, text: string): Promise<{ response: string; pendingTx: any }> {
+  const res = await (fetch as any)('http://localhost:3001/api/chat', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text, sessionId: cfg.sessionId || 'livebot-session',
+      provider: cfg.provider || 'gemini',
+      apiKey:   cfg.apiKey   || '',
+      walletAddress: cfg.walletAddress,
+    }),
+  });
+  if (!res.ok) throw new Error(`Agent API ${res.status}`);
+  return res.json() as any;
+}
+
+// ─── Position Size Calculator ─────────────────────────────────────────────────
+
+function calcSize(cfg: LiveBotConfig, price: number) {
+  // capitalSUI = SUI capital (VD: 0.5 SUI)
+  // EA sizing: risk_pct mode sizes so a full SL hit costs exactly riskPct% of
+  // capital; fixed_pct keeps the legacy capital × orderPct% margin. Shared
+  // with the backtester (calcMargin) so both engines size identically.
+  const marginSUI  = calcMargin(cfg, cfg.capitalSUI);
+  const positionSUI = marginSUI * cfg.leverage;
+
+  // LONG: borrow SUI, SHORT: borrow USDC (giá trị tương đương SUI * price)
+  const borrowSUI  = Math.round(positionSUI  * 1000) / 1000;
+  const borrowUSDC = Math.round(positionSUI  * price * 100) / 100;
+
+  return { marginSUI, borrowSUI, borrowUSDC };
+}
+
+function calcPnl(pos: ActivePosition, currentPrice: number) {
+  const diff = pos.type === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+  return { pct: Math.round((diff / pos.entryPrice) * 100 * cfg_leverage_cache * 100) / 100 };
+}
+let cfg_leverage_cache = 1; // updated on each position open
+
+// ─── Open Position ────────────────────────────────────────────────────────────
+
+async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: number) {
+  if (state.position) return;
+
+  const { borrowSUI, borrowUSDC } = calcSize(cfg, price);
+  cfg_leverage_cache = cfg.leverage;
+
+  const tpPrice = type === 'LONG' ? price * (1 + cfg.takeProfitPct / 100) : price * (1 - cfg.takeProfitPct / 100);
+  const slPrice = type === 'LONG' ? price * (1 - cfg.stopLossPct   / 100) : price * (1 + cfg.stopLossPct   / 100);
+
+  addLog('signal', `📡 ${type} signal @ $${price.toLocaleString()} | TP:$${Math.round(tpPrice).toLocaleString()} SL:$${Math.round(slPrice).toLocaleString()}`, price);
+  broadcast({ type: 'SIGNAL_DETECTED', signalType: type, price, tpPrice, slPrice });
+
+  const { base, quote } = pairAssets(cfg.pair);
+  const pool = `${base}_${quote}`;
+  const borrowAmt  = type === 'LONG' ? borrowSUI : borrowUSDC;
+  const borrowAsset= type === 'LONG' ? base : quote;
+
+  try {
+    if (state.mode === 'direct') {
+      if (!_cachedPrivateKey) {
+        addLog('error', '❌ Auto Bot: private key missing. Reload it via the Setup Wizard.');
+        state.position = null;
+        broadcastState();
+        return;
+      }
+      // ── Optional AI safety check (opt-in, $0 when off) ──
+      if (cfg.aiValidation?.enabled) {
+        addLog('info', `🤖 AI safety check: ${cfg.aiValidation.provider}...`);
+        const verdict = await aiValidateSignal(cfg, type, price, state.lastIndicators);
+        if (!verdict.approved) {
+          addLog('warning', `🛑 AI VETOED ${type} @ $${price.toLocaleString()}: ${verdict.reason}`);
+          broadcast({ type: 'AI_VETO', signalType: type, price, reason: verdict.reason });
+          state.position = null;
+          broadcastState();
+          return;
+        }
+        addLog('info', `✅ AI approved ${type}${verdict.confidence !== undefined ? ` (conf ${verdict.confidence}%)` : ''}: ${verdict.reason}`);
+      }
+
+      // ── MODE B: Tự ký + execute thẳng (no AI, or AI-approved) ──
+      const keypair = getKeypair(_cachedPrivateKey);
+      let digest: string;
+      let posBorrowAsset = borrowAsset;
+      let posBorrowAmt   = borrowAmt;
+
+      if (isXbtcPair(cfg.pair)) {
+        // xBTC/USDC → DeepTrade spot market order, server-signed
+        if (!cfg.balanceManagerId || !cfg.feeManagerId) {
+          addLog('error', `❌ xBTC setup required: create a BalanceManager + FeeManager first (DeepTrade Account panel), then save the IDs. No trade placed.`);
+          state.position = null; broadcastState(); return;
+        }
+        const side = type === 'LONG' ? 'buy' : 'sell';
+        const qtyXbtc = Math.max(0, Math.round((borrowUSDC / price) * 1e8) / 1e8);
+        addLog('info', `⚙️ [DIRECT] xBTC ${side.toUpperCase()} ${qtyXbtc} @ $${price.toLocaleString()}...`);
+        digest = await directXbtcOrder(keypair, side, price, qtyXbtc, cfg.balanceManagerId, cfg.feeManagerId, true, cfg.skillAuthor);
+        posBorrowAsset = 'XBTC'; posBorrowAmt = qtyXbtc;
+      } else {
+        // SUI/USDC → DeepBook margin borrow, server-signed
+        addLog('info', `⚙️ [DIRECT] Open ${type} — borrow ${borrowAmt} ${borrowAsset}...`);
+        digest = await directOpen(keypair, type, borrowAmt, cfg.skillAuthor);
+      }
+
+      state.position = {
+        type, entryPrice: price, entryTime: new Date().toISOString(),
+        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        trailPeak: price, borrowAsset: posBorrowAsset, borrowAmount: posBorrowAmt,
+        unrealizedPnl: 0, unrealizedPct: 0,
+      };
+      state.tradeCount++;
+      persistState();
+      const feeNote = cfg.skillAuthor
+        ? ` · 0.01 SUI fee → ${cfg.skillAuthor.slice(0, 6)}…${cfg.skillAuthor.slice(-4)} (0.005 author) + market (0.005)`
+        : ' · no bot fee (skill has no author address)';
+      addLog('trade', `✅ [DIRECT] Opened ${type} @ $${price.toLocaleString()}${feeNote}`, price, undefined, digest);
+      recordOpen(type, price, digest);
+      broadcast({ type: 'TRADE_OPENED', position: state.position, txDigest: digest });
+
+    } else if (isXbtcPair(cfg.pair)) {
+      // ── DeepTrade spot (xBTC/USDC): real DeepBook order via deeptrade_xbtc_order ──
+      if (!cfg.balanceManagerId || !cfg.feeManagerId) {
+        addLog('error', `❌ DeepTrade setup required: create a BalanceManager + FeeManager first (deeptrade_xbtc_setup), then save the IDs to the bot. No trade placed.`);
+        state.position = null;
+        broadcastState();
+        return;
+      }
+      const side = type === 'LONG' ? 'buy' : 'sell';
+      const notionalUSDC = borrowUSDC; // USDC notional for this entry
+      const qtyXbtc = Math.max(0, Math.round((notionalUSDC / price) * 1e8) / 1e8);
+      const command =
+        `[BOT SKILL SIGNAL — ${type}] Signal "${cfg.signal}" triggered on xBTC/USDC @ $${price.toLocaleString()}.\n` +
+        `Request: deeptrade_xbtc_order | side: ${side} | price: ${price} | quantity: ${qtyXbtc} | ` +
+        `balanceManagerId: ${cfg.balanceManagerId} | feeManagerId: ${cfg.feeManagerId} | wallet: ${cfg.walletAddress} | executionMode: require_approval`;
+
+      const { pendingTx } = await callAgent(cfg, command);
+
+      state.position = {
+        type, entryPrice: price, entryTime: new Date().toISOString(),
+        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        trailPeak: price, borrowAsset: 'XBTC', borrowAmount: qtyXbtc,
+        unrealizedPnl: 0, unrealizedPct: 0,
+      };
+      persistState();
+      addLog('trade', `⏳ [DEEPTRADE] Awaiting wallet signature: ${side.toUpperCase()} ${qtyXbtc} xBTC @ $${price.toLocaleString()}`, price);
+      broadcast({ type: 'PENDING_TX', intent: 'open', pendingTx, position: state.position });
+
+    } else {
+      // ── MODE A: Qua Agent chat → frontend ký ──
+      const command =
+        `[BOT SKILL SIGNAL — ${type}] Signal "${cfg.signal}" triggered on ${cfg.pair} @ $${price.toLocaleString()}.\n` +
+        `Request: margin_open_position | pool: ${pool} | ${type === 'LONG' ? `borrow ${borrowAmt} ${base}` : `borrow ${borrowAmt} ${quote}`} | wallet: ${cfg.walletAddress} | executionMode: require_approval`;
+
+      const { pendingTx } = await callAgent(cfg, command);
+
+      state.position = {
+        type, entryPrice: price, entryTime: new Date().toISOString(),
+        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        trailPeak: price, borrowAsset, borrowAmount: borrowAmt,
+        unrealizedPnl: 0, unrealizedPct: 0,
+      };
+      persistState();
+      addLog('trade', `⏳ [AGENT] Waiting for the frontend to sign OPEN ${type} @ $${price.toLocaleString()}`, price);
+      broadcast({ type: 'PENDING_TX', intent: 'open', pendingTx, position: state.position });
+    }
+  } catch (err: any) {
+    addLog('error', `❌ Could not open ${type}: ${err.message}`);
+    state.position = null;
+  }
+
+  broadcastState();
+}
+
+// ─── Close Position ───────────────────────────────────────────────────────────
+
+async function closePosition(reason: ExitReason | 'Manual', exitPrice: number) {
+  lastExitAt = Date.now();   // EA cooldownBars reference
+  if (!state.position || !state.config) return;
+  const pos = state.position;
+  const cfg = state.config as LiveBotConfig;
+
+  const diff    = pos.type === 'LONG' ? exitPrice - pos.entryPrice : pos.entryPrice - exitPrice;
+  const pnlPct  = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
+  const pnlApprox = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+
+  addLog('signal', `🔔 ${reason} @ $${exitPrice.toLocaleString()} | PnL ≈ ${pnlApprox >= 0 ? '+' : ''}${pnlApprox} | ${pnlPct}%`, exitPrice, pnlApprox);
+
+  try {
+    if (state.mode === 'direct') {
+      if (!_cachedPrivateKey) {
+        addLog('error', '❌ Auto Bot: private key missing — cannot close. Position stays open.');
+        return;
+      }
+      const keypair = getKeypair(_cachedPrivateKey);
+      let digest: string;
+
+      if (isXbtcPair(cfg.pair)) {
+        // xBTC/USDC → close = opposite-side DeepTrade market order, server-signed
+        if (!cfg.balanceManagerId || !cfg.feeManagerId) {
+          addLog('error', `❌ xBTC setup required to close. Position kept open.`); return;
+        }
+        const side = pos.type === 'LONG' ? 'sell' : 'buy';
+        addLog('info', `⚙️ [DIRECT] Close xBTC ${side.toUpperCase()} ${pos.borrowAmount} @ $${exitPrice.toLocaleString()}...`);
+        // Close = free (isOpening: false)
+        digest = await directXbtcOrder(keypair, side, exitPrice, pos.borrowAmount, cfg.balanceManagerId, cfg.feeManagerId, false);
+      } else {
+        // SUI/USDC → repay margin borrow, server-signed
+        addLog('info', `⚙️ [DIRECT] Closing ${pos.type} — repaying ${pos.borrowAmount} ${pos.borrowAsset}…`);
+        digest = await directClose(keypair, pos.type, pos.borrowAmount);
+      }
+
+      state.totalPnl   = Math.round((state.totalPnl + pnlApprox) * 100) / 100;
+      state.tradeCount++;
+      addLog('trade', `✅ [DIRECT] Closed ${pos.type} | ${reason} | PnL: ${pnlApprox >= 0 ? '+' : ''}${pnlApprox}`, exitPrice, pnlApprox, digest);
+      recordClose(exitPrice, pnlPct, pnlApprox, reason, digest);
+      broadcast({ type: 'TRADE_CLOSED', reason, exitPrice, pnlApprox, pnlPct, txDigest: digest });
+
+    } else if (isXbtcPair(cfg.pair)) {
+      // ── DeepTrade spot close: opposite side of the entry ──
+      if (!cfg.balanceManagerId || !cfg.feeManagerId) {
+        addLog('error', `❌ DeepTrade setup required to close. Position kept open.`);
+        return;
+      }
+      const side = pos.type === 'LONG' ? 'sell' : 'buy';
+      const command =
+        `[BOT SKILL — CLOSE POSITION] Reason: ${reason} | Price: $${exitPrice.toLocaleString()}\n` +
+        `Request: deeptrade_xbtc_order | side: ${side} | price: ${exitPrice} | quantity: ${pos.borrowAmount} | ` +
+        `balanceManagerId: ${cfg.balanceManagerId} | feeManagerId: ${cfg.feeManagerId} | wallet: ${cfg.walletAddress} | executionMode: require_approval`;
+
+      const { pendingTx } = await callAgent(cfg as LiveBotConfig, command);
+
+      state.totalPnl   = Math.round((state.totalPnl + pnlApprox) * 100) / 100;
+      state.tradeCount++;
+      addLog('trade', `⏳ [DEEPTRADE] Awaiting signature to close (${side.toUpperCase()} ${pos.borrowAmount} xBTC) | ${reason}`, exitPrice, pnlApprox);
+      broadcast({ type: 'PENDING_TX', intent: 'close', pendingTx, pnlApprox, reason });
+
+    } else {
+      const closePool = `${pairAssets(cfg.pair).base}_${pairAssets(cfg.pair).quote}`;
+      const command =
+        `[BOT SKILL — CLOSE POSITION] Reason: ${reason} | Price: $${exitPrice.toLocaleString()}\n` +
+        `Request: margin_close_position | pool: ${closePool} | repay ${pos.borrowAmount} ${pos.borrowAsset} | wallet: ${cfg.walletAddress} | executionMode: require_approval`;
+
+      const { pendingTx } = await callAgent(cfg as LiveBotConfig, command);
+
+      state.totalPnl   = Math.round((state.totalPnl + pnlApprox) * 100) / 100;
+      state.tradeCount++;
+      addLog('trade', `⏳ [AGENT] Waiting for the frontend to sign CLOSE ${pos.type} | ${reason}`, exitPrice, pnlApprox);
+      broadcast({ type: 'PENDING_TX', intent: 'close', pendingTx, pnlApprox, reason });
+    }
+  } catch (err: any) {
+    addLog('error', `❌ Could not close: ${err.message}`);
+  }
+
+  state.position = null;
+  persistState();
+  broadcastState();
+}
+
+// ─── Core Trading Loop ────────────────────────────────────────────────────────
+
+let pollingTimer: ReturnType<typeof setTimeout> | null = null;
+let manageTimer:  ReturnType<typeof setInterval> | null = null;
+
+// EA bookkeeping (per bot run)
+let lastSignalBar = '';   // ISO date of the closed bar the last entry fired on
+let lastExitAt    = 0;    // Date.now() of the last closed trade (cooldownBars)
+
+const TF_MS: Record<string, number> = {
+  '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000,
+};
+
+/** Adapter: run the SAME exit rules the backtester uses against a live tick. */
+function liveManage(cfg: LiveBotConfig, price: number, opposite: { buy: boolean; sell: boolean }) {
+  const pos = state.position!;
+
+  // EA time-stop (maxTimeInPosition): bars elapsed since entry ≥ limit → close.
+  if ((cfg.maxBarsInTrade ?? 0) > 0) {
+    const tfMs = TF_MS[cfg.timeframe] || 900_000;
+    const bars = (Date.now() - new Date(pos.entryTime).getTime()) / tfMs;
+    if (bars >= cfg.maxBarsInTrade!) return { price, reason: 'Time' as const };
+  }
+
+  const managed = {
+    type: pos.type, entryPrice: pos.entryPrice,
+    tpPrice: pos.tpPrice, slPrice: pos.slPrice,
+    peakPrice: pos.trailPeak, beApplied: pos.beApplied,
+  };
+  const exit = manageExit(cfg, managed, { high: price, low: price, close: price }, opposite);
+  // Persist mutations (trailing peak + breakeven SL move) back onto the live position
+  pos.trailPeak = managed.peakPrice;
+  if (managed.beApplied && !pos.beApplied) {
+    pos.beApplied = true;
+    pos.slPrice   = managed.slPrice;
+    addLog('info', `🛡️ Breakeven armed — SL moved to entry ($${pos.slPrice.toFixed(4)})`);
+  }
+  return exit;
+}
+
+/** EA entry filters: session window, cooldown, loss streak, daily loss cap.
+ *  Returns a human-readable block reason, or null when entries are allowed. */
+function entryBlockReason(cfg: LiveBotConfig): string | null {
+  if (!inSession(Date.now(), cfg)) return `outside session ${cfg.sessionStartHour}–${cfg.sessionEndHour}h UTC`;
+
+  const tfMs = TF_MS[cfg.timeframe] || 900_000;
+  if ((cfg.cooldownBars ?? 0) > 0 && lastExitAt > 0 &&
+      Date.now() - lastExitAt < cfg.cooldownBars! * tfMs) {
+    return `cooldown (${cfg.cooldownBars} bars after last trade)`;
+  }
+
+  if ((cfg.maxConsecLosses ?? 0) > 0) {
+    let streak = 0;
+    for (const r of tradeHistory) {            // newest first
+      if (r.closeTime === null) continue;
+      if ((r.pnlVal ?? 0) < 0) streak++; else break;
+    }
+    if (streak >= cfg.maxConsecLosses!) return `${streak} consecutive losses — paused (EA stop)`;
+  }
+
+  if ((cfg.maxDailyLossPct ?? 0) > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const dayPct = tradeHistory
+      .filter(r => r.closeTime && r.closeTime.slice(0, 10) === today)
+      .reduce((s, r) => s + (r.pnlPct ?? 0), 0);
+    if (dayPct <= -cfg.maxDailyLossPct!) return `daily loss limit hit (${dayPct.toFixed(1)}%)`;
+  }
+  return null;
+}
+
+async function tradingTick() {
+  if (!state.active || !state.config) return;
+  const cfg = state.config as LiveBotConfig;
+
+  try {
+    // MTF filter needs a deep history so the HTF Supertrend has warmed up
+    // (e.g. H4 ST(10) on M5 ⇒ ≥ 11 closed H4 buckets ⇒ ≥ 528 M5 bars).
+    const lookback = cfg.htfMinutes ? 1000 : 121;
+    const candles = await fetchCandles(cfg.pair, cfg.timeframe, lookback);
+    candlesCache = candles; // expose to the UI chart — same data the bot trades on
+    if (candles.length < 36) { addLog('warning', `Not enough data (${candles.length} candles)`); return; }
+
+    // MT-style OnBar: signals are evaluated on CLOSED candles only (the last
+    // Binance kline is still forming — using it repaints and double-fires).
+    const closed   = candles.slice(0, -1);
+    const price    = candles[candles.length - 1].close;   // live-ish price for management
+    const lastBar  = closed[closed.length - 1].date;
+    state.currentPrice = price;
+    state.lastUpdate   = new Date().toLocaleTimeString('en-GB');
+
+    const { buy, sell, lastValues } = detectLiveSignal(closed, cfg.signal, cfg.direction,
+      { supertrendMult: cfg.supertrendMult, supertrendPeriod: cfg.supertrendPeriod, breakoutPeriod: cfg.breakoutPeriod,
+        htfMinutes: cfg.htfMinutes, htfSupertrendPeriod: cfg.htfSupertrendPeriod, htfSupertrendMult: cfg.htfSupertrendMult });
+    state.lastIndicators = lastValues;
+    state.lastSignal     = buy ? 'BUY' : sell ? 'SELL' : 'HOLD';
+
+    // ── Manage the open position (shared EA rules) ──
+    if (state.position) {
+      const pos  = state.position;
+      const diff = pos.type === 'LONG' ? price - pos.entryPrice : pos.entryPrice - price;
+      pos.unrealizedPct = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
+      pos.unrealizedPnl = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+
+      const exit = liveManage(cfg, price, { buy, sell });
+      if (exit) { await closePosition(exit.reason, exit.price); return; }
+
+      broadcast({ type: 'POSITION_UPDATE', position: pos, price, indicators: lastValues, signal: state.lastSignal });
+
+    } else if (buy || sell) {
+      // One entry attempt per closed bar (EA new-bar gate), then risk filters.
+      if (lastSignalBar === lastBar) {
+        broadcast({ type: 'PRICE_UPDATE', price, indicators: lastValues, signal: state.lastSignal, lastUpdate: state.lastUpdate });
+      } else {
+        const block = entryBlockReason(cfg);
+        if (block) {
+          addLog('warning', `🚧 ${state.lastSignal} signal skipped — ${block}`);
+          lastSignalBar = lastBar; // don't re-log every poll for the same bar
+        } else {
+          lastSignalBar = lastBar;
+          await openPosition(cfg, buy ? 'LONG' : 'SHORT', price);
+        }
+      }
+    } else {
+      addLog('info', `🔍 ${cfg.signal} @ $${price.toLocaleString()} | RSI:${lastValues.rsi} | HOLD`);
+      broadcast({ type: 'PRICE_UPDATE', price, indicators: lastValues, signal: 'HOLD', lastUpdate: state.lastUpdate });
+    }
+
+  } catch (err: any) { addLog('error', `Poll error: ${err.message}`); }
+
+  broadcastState();
+}
+
+// ─── Fast management sub-loop (10s) ──────────────────────────────────────────
+// MT EAs manage stops on every tick. Between candle polls we fetch just the
+// ticker price and run TP/SL/breakeven/trailing — never entries (those stay
+// on closed bars). Keeps exits tight even on 30m/1h timeframes.
+async function managementTick() {
+  if (!state.active || !state.position || !state.config) return;
+  const cfg = state.config as LiveBotConfig;
+  try {
+    const sym = pairAssets(cfg.pair).binanceSymbol;
+    const res = await (fetch as any)(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`,
+      { signal: AbortSignal.timeout(8_000) });
+    const price = parseFloat(((await res.json()) as any).price);
+    if (!Number.isFinite(price) || price <= 0) return;
+
+    const pos  = state.position;
+    state.currentPrice = price;
+    const diff = pos.type === 'LONG' ? price - pos.entryPrice : pos.entryPrice - price;
+    pos.unrealizedPct = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
+    pos.unrealizedPnl = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+
+    const exit = liveManage(cfg, price, { buy: false, sell: false });
+    if (exit) { await closePosition(exit.reason, exit.price); return; }
+
+    broadcast({ type: 'POSITION_UPDATE', position: pos, price, indicators: state.lastIndicators, signal: state.lastSignal });
+  } catch { /* transient ticker errors are fine — candle poll still manages */ }
+}
+
+// ─── Controller ───────────────────────────────────────────────────────────────
+
+// Supported timeframes: 5m, 15m, 30m, 1h
+const TF_INTERVALS: Record<string, number> = {
+  '5m':  30_000,   // poll every 30s for M5
+  '15m': 60_000,   // poll every 60s for M15
+  '30m': 90_000,   // poll every 90s for M30
+  '1h':  120_000,  // poll every 2min for H1
+};
+
+export const liveBotController = {
+  configure(cfg: LiveBotConfig) {
+    // ⚠️ Tách privateKey ra, lưu riêng trong memory
+    const { privateKey, ...safeCfg } = cfg;
+    if (privateKey) {
+      _cachedPrivateKey = privateKey;
+      addLog('info', '🔑 Private key loaded into memory (never written to disk)');
+    }
+    state.config       = safeCfg;
+    // Direct mode if explicitly requested (fallback to agent if not requested).
+    // We don't silently fallback to agent mode if a key is missing, because
+    // it will cause a cryptic "Agent API 400" error for Auto Bots.
+    state.mode         = cfg.directMode ? 'direct' : 'agent';
+    if (state.mode === 'direct' && !privateKey && !_cachedPrivateKey) {
+      addLog('error', '⚠️ ERROR: Auto Bot (direct mode) is on but the private key is missing! Update the config.');
+    }
+    state.pollInterval = TF_INTERVALS[cfg.timeframe] || 60_000;
+    persistState();
+    addLog('info', `⚙️ Config: ${cfg.botSkillName} | ${cfg.pair} | ${cfg.timeframe} | Mode: ${state.mode.toUpperCase()}`);
+    broadcastState();
+  },
+
+  start() {
+    if (state.active) return;
+    if (!state.config) { addLog('error', 'No bot skill configured'); return; }
+    state.active = true;
+    lastSignalBar = '';   // reset EA new-bar gate per run
+    addLog('info', `🚀 Bot started [${state.mode.toUpperCase()} MODE]: ${state.config.botSkillName}`);
+    if (state.mode === 'direct') addLog('info', '⚡ DIRECT MODE — the bot signs and executes orders itself, no confirmation needed');
+    broadcastState();
+    tradingTick();
+    const schedule = () => {
+      pollingTimer = setTimeout(async () => {
+        if (!state.active) return;
+        await tradingTick();
+        schedule();
+      }, state.pollInterval);
+    };
+    schedule();
+    // EA tick-level stop management between candle polls (no entries here)
+    manageTimer = setInterval(managementTick, 10_000);
+  },
+
+  stop() {
+    state.active = false;
+    if (pollingTimer) { clearTimeout(pollingTimer); pollingTimer = null; }
+    if (manageTimer)  { clearInterval(manageTimer); manageTimer = null; }
+    addLog('info', '⏹ Bot stopped');
+    broadcastState();
+  },
+
+  clearKey() {
+    _cachedPrivateKey = null;
+    addLog('info', '🗑️ Private key wiped from memory');
+  },
+
+  getState(): Omit<BotState, never> { return { ...state }; },
+
+  /** Latest klines from the bot's own feed — same data its signals run on. */
+  getCandles(): Candle[] { return candlesCache; },
+
+  /** Persisted buy/sell records (newest first). */
+  getHistory(): TradeRecord[] { return tradeHistory; },
+
+  /** Manually close the open position at the current market price.
+   *  Used by the UI "Close now" button — bypasses TP/SL/signal logic. */
+  async closeNow(): Promise<{ ok: boolean; message: string }> {
+    if (!state.position) return { ok: false, message: 'No open position to close.' };
+    const price = state.currentPrice || state.position.entryPrice;
+    addLog('warning', `✋ Manual close requested @ $${price.toLocaleString()}`);
+    await closePosition('Manual', price);
+    return state.position
+      ? { ok: false, message: 'Close failed — see bot log for the on-chain error.' }
+      : { ok: true,  message: 'Position closed manually.' };
+  },
+};

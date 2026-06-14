@@ -1,0 +1,19 @@
+{
+  "models": {
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com/v1",
+        "apiKey": "sk-YOUR_DEEPSEEK_KEY_HERE",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-chat",
+            "name": "DeepSeek-V4-Pro",
+            "contextWindow": 1000000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  }
+}
