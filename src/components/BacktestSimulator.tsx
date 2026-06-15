@@ -14,6 +14,7 @@ import {
   loadBotSkills, upsertBotSkill, PRESET_SKILLS,
   type BotSkillConfig,
 } from '../types/botSkill';
+import { useCurrentAccount } from '@mysten/dapp-kit';
 import { AGENT_URL } from '../agent/agentUrl';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -386,6 +387,7 @@ interface Props {
 }
 
 export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
+  const account = useCurrentAccount();
   // ── Bot Skills ──
   const [botSkills,      setBotSkills]      = useState<BotSkillConfig[]>([]);
   const [activeBotSkill, setActiveBotSkill] = useState<BotSkillConfig | null>(null);
@@ -505,6 +507,68 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
       },
     });
     setBotSkills(updated);
+  };
+
+  // ── Save the currently-tested config as a NEW local bot (→ My Bot) ──
+  const handleSaveAsBot = () => {
+    if (!result) { alert('Run a backtest first, then save the result as a bot.'); return; }
+    const isPreset = activeBotSkill && PRESET_SKILLS.some(p => p.name === activeBotSkill.name);
+    const suggested = activeBotSkill && !isPreset
+      ? activeBotSkill.name
+      : `${indicator}_${timeframe.toLowerCase()}_${Date.now().toString().slice(-4)}`;
+    const input = window.prompt('Save as Bot — name (lowercase letters, numbers, underscores):', suggested);
+    if (input == null) return;
+    const name = input.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+    if (!name) { alert('Invalid name.'); return; }
+
+    const skill: BotSkillConfig = {
+      name,
+      description: activeBotSkill?.description
+        || `${indicator} · ${direction} · TP${takeProfitPct}/SL${stopLossPct} · ${leverage}x (saved from backtest)`,
+      version: '1.0.0',
+      createdAt: new Date().toISOString(),
+      signal: indicator,
+      direction,
+      takeProfitPct, stopLossPct, trailingStopPct, enableTrailing, enableDefense,
+      leverage, orderPct, commission,
+      // EA params aren't editable in the backtest form — carry them over from the
+      // active skill so editing a preset keeps its supertrend/HTF/MM settings.
+      supertrendPeriod:    activeBotSkill?.supertrendPeriod,
+      supertrendMult:      activeBotSkill?.supertrendMult,
+      breakoutPeriod:      activeBotSkill?.breakoutPeriod,
+      maxBarsInTrade:      activeBotSkill?.maxBarsInTrade,
+      htfMinutes:          activeBotSkill?.htfMinutes,
+      htfSupertrendPeriod: activeBotSkill?.htfSupertrendPeriod,
+      htfSupertrendMult:   activeBotSkill?.htfSupertrendMult,
+      sizingMode:          activeBotSkill?.sizingMode,
+      riskPct:             activeBotSkill?.riskPct,
+      breakEvenTriggerPct: activeBotSkill?.breakEvenTriggerPct,
+      cooldownBars:        activeBotSkill?.cooldownBars,
+      maxConsecLosses:     activeBotSkill?.maxConsecLosses,
+      maxDailyLossPct:     activeBotSkill?.maxDailyLossPct,
+      sessionStartHour:    activeBotSkill?.sessionStartHour,
+      sessionEndHour:      activeBotSkill?.sessionEndHour,
+      slippagePct:         activeBotSkill?.slippagePct,
+      authorAddress:       account?.address || activeBotSkill?.authorAddress,
+      preferredTimeframe:  timeframe,
+      preferredAsset:      asset,
+      lastStats: {
+        winRate:        result.stats.winRate,
+        profitFactor:   result.stats.profitFactor,
+        sharpeRatio:    result.stats.sharpeRatio,
+        netProfitPct:   result.stats.netProfitPct,
+        maxDrawdownPct: result.stats.maxDrawdownPct,
+        totalTrades:    result.stats.totalTrades,
+        testedAt:       new Date().toISOString().split('T')[0],
+        timeframe,
+        duration,
+        asset: ASSET_CONFIGS[asset].label,
+      },
+    };
+    const updated = upsertBotSkill(skill);
+    setBotSkills(updated);
+    setActiveBotSkill(skill);
+    alert(`✅ Saved bot "${name}" locally.\n\nFind it in Autobots Factory → 📦 My Bot, where you can publish it to the marketplace.`);
   };
 
   // ── Load data ──────────────────────────────────────────────────────
@@ -879,6 +943,21 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
             }}
           >
             {isLoading ? '⏳ Loading...' : isRunning ? '⚙️ Computing...' : '⚡ RUN BACKTEST'}
+          </button>
+
+          {/* Save the tested config as a local bot → My Bot */}
+          <button
+            onClick={handleSaveAsBot}
+            disabled={!result}
+            title={result ? 'Save these settings as a bot in My Bot' : 'Run a backtest first'}
+            style={{
+              padding: '10px', borderRadius: 8, cursor: result ? 'pointer' : 'not-allowed',
+              border: `1px solid ${result ? '#818cf8' : '#1e293b'}`,
+              background: result ? 'rgba(99,102,241,0.1)' : 'transparent',
+              color: result ? '#818cf8' : '#475569', fontWeight: 700, fontSize: '0.8rem',
+            }}
+          >
+            💾 Save as Bot {result ? '→ My Bot' : ''}
           </button>
 
           {/* Replay speed (replay mode only) */}
