@@ -56,12 +56,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Manual Trade + AI Assistant are no longer top-level items — they're reached
   // via the Live Trade "Trading Mode" switch (Manual rung / AI Agent rung). The
   // AI chat also stays reachable through the Chat History section below.
-  const menuItems: { id: ViewType; icon: string; label: string }[] = [
+  // Desktop app trims to Trade + Backtest + Factory (My Bot) — no Home/marketing.
+  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+  const allMenuItems: { id: ViewType; icon: string; label: string }[] = [
     { id: 'dashboard', icon: '⌂', label: t('sidebar.nav.dashboard') },
     { id: 'livetrade', icon: '⚡', label: t('sidebar.nav.livetrade') },
     { id: 'factory',   icon: '🏭', label: t('sidebar.nav.factory') },
     { id: 'backtest',  icon: '🧪', label: t('sidebar.nav.backtest') },
   ];
+  const menuItems = isDesktop ? allMenuItems.filter(m => m.id !== 'dashboard') : allMenuItems;
 
   return (
     <div style={{
@@ -107,8 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* ── Chat History (Recent Chats) ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, flex: 1, overflowY: 'auto' }}>
+      {/* ── Chat History (Recent Chats) — hidden in the trimmed desktop app ── */}
+      <div style={{ display: isDesktop ? 'none' : 'flex', flexDirection: 'column', gap: 8, marginTop: 24, flex: 1, overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 8, paddingRight: 8, marginBottom: 8 }}>
           <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>
             {t('sidebar.chatHistory')}
@@ -177,9 +180,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {!agentOnline && isHttps && (
+        {!agentOnline && isHttps && !isDesktop && (
           // Most common cause when the agent IS installed: the browser hasn't
           // trusted the agent's self-signed HTTPS cert yet. Offer that first.
+          // (Desktop app bundles the agent + auto-trusts the cert → never shown.)
           <>
             <button style={{
               width: '100%', padding: '11px 0', borderRadius: 10,
@@ -207,7 +211,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </>
         )}
 
-        {!agentOnline && !isHttps && (
+        {!agentOnline && !isHttps && !isDesktop && (
           <button style={{
             width: '100%', padding: '11px 0', borderRadius: 10,
             background: 'var(--sui-blue)',

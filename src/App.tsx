@@ -17,8 +17,13 @@ import { useI18n } from './i18n';
 
 import './App.css';
 
+// Desktop (Electron) build flag — set by the preload. Trims the UI to the
+// agent-signed Client Bot + Backtest; no browser-wallet tiers (Manual/Web/AI).
+const IS_DESKTOP = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  // Desktop app opens straight to Live Trade (Home is hidden in the trimmed build).
+  const [currentView, setCurrentView] = useState<ViewType>(IS_DESKTOP ? 'livetrade' : 'dashboard');
   const [showApiSetup, setShowApiSetup] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>('gemini');
@@ -32,7 +37,7 @@ export default function App() {
   // Live Trade tier ladder (increasing automation): 'manual' (you sign each) →
   // 'web' (no-install bot, you sign) → 'agent' (downloaded Client Bot, auto-sign 24/7).
   // The 4th rung — AI Agent (auto) — lives in the AI Assistant view, reached via the switch.
-  const [liveTier, setLiveTier] = useState<'manual' | 'web' | 'agent'>('web');
+  const [liveTier, setLiveTier] = useState<'manual' | 'web' | 'agent'>(IS_DESKTOP ? 'agent' : 'web');
   const { t } = useI18n();
 
   // Check whether setup is required once the app has loaded
@@ -164,29 +169,32 @@ export default function App() {
           {userConfig.needsSetup ? '⚠️' : '🔧'}
         </button>
 
-        {/* AI settings (status dot folded into the button) */}
-        <button onClick={() => setShowApiSetup(s => !s)}
-          title={status === 'ready'
-            ? t('header.aiConnected', { provider: provider === 'gemini' ? 'Gemini' : 'DeepSeek' })
-            : t('header.aiDisconnected')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 16px', borderRadius: 8,
-            background: status === 'ready' ? 'transparent' : 'rgba(77,162,255,0.1)',
-            border: `1px solid ${status === 'ready' ? '#334155' : 'rgba(77,162,255,0.35)'}`,
-            color: status === 'ready' ? '#94a3b8' : 'var(--sui-blue)',
-            fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
-          }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusDot, display: 'inline-block', flexShrink: 0 }} />
-          {t('header.aiSettings')}
-        </button>
+        {/* AI settings + browser wallet — hidden in the desktop app (agent-signed, no extension) */}
+        {!IS_DESKTOP && (
+          <>
+            <button onClick={() => setShowApiSetup(s => !s)}
+              title={status === 'ready'
+                ? t('header.aiConnected', { provider: provider === 'gemini' ? 'Gemini' : 'DeepSeek' })
+                : t('header.aiDisconnected')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 16px', borderRadius: 8,
+                background: status === 'ready' ? 'transparent' : 'rgba(77,162,255,0.1)',
+                border: `1px solid ${status === 'ready' ? '#334155' : 'rgba(77,162,255,0.35)'}`,
+                color: status === 'ready' ? '#94a3b8' : 'var(--sui-blue)',
+                fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
+              }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusDot, display: 'inline-block', flexShrink: 0 }} />
+              {t('header.aiSettings')}
+            </button>
 
-        {/* Wallet */}
-        <ConnectButton style={{
-          background: 'var(--sui-blue)',
-          border: 'none', borderRadius: 8, color: 'var(--sui-blue-ink)',
-          fontSize: '0.8rem', fontWeight: 600, padding: '8px 16px',
-        }} />
+            <ConnectButton style={{
+              background: 'var(--sui-blue)',
+              border: 'none', borderRadius: 8, color: 'var(--sui-blue-ink)',
+              fontSize: '0.8rem', fontWeight: 600, padding: '8px 16px',
+            }} />
+          </>
+        )}
       </header>
 
       {/* ── API Setup Dropdown ── */}
@@ -304,8 +312,9 @@ export default function App() {
           {currentView === 'livetrade' && (
             <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
               {/* 4-rung automation ladder. Manual / Web / Client render inline here;
-                  AI Agent routes to the AI Assistant view in autonomous (auto) mode. */}
-              {(() => {
+                  AI Agent routes to the AI Assistant view in autonomous (auto) mode.
+                  Hidden in the desktop app — there it's Client Bot only (agent-signed). */}
+              {!IS_DESKTOP && (() => {
                 const TIERS = [
                   { id: 'manual', icon: '✍️', title: 'Manual',     sub: 'You decide & sign every trade',        nav: false },
                   { id: 'web',    icon: '🌐', title: 'Web Bot',    sub: 'No install · bot signals, you sign',    nav: false },
@@ -357,13 +366,13 @@ export default function App() {
                 );
               })()}
 
-              {liveTier === 'manual' ? (
+              {(!IS_DESKTOP && liveTier === 'manual') ? (
                 <ManualTradeView
                   onAskAgent={handleAskFromManual}
                   disabled={status !== 'ready'}
                   dashboardData={dashboardData}
                 />
-              ) : liveTier === 'web' ? (
+              ) : (!IS_DESKTOP && liveTier === 'web') ? (
                 <WebBotPanel />
               ) : (
                 <LiveTradeDashboard

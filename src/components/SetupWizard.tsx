@@ -370,12 +370,19 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
 
   const handleSaveApiKey = () => {
     saveApiKey(provider, provider === ('openclaw' as typeof provider) ? 'openclaw' : apiKey);
-    setStep(3);
+    setStep(isDesktop ? 4 : 3);   // desktop has no Connect-Wallet step
   };
 
-  const handleLoadPk = () => {
+  // Desktop app: no browser wallet — the key is persisted in the app install dir
+  // and the bundled agent uses it to derive the address + sign. Step 3 is skipped.
+  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+
+  const handleLoadPk = async () => {
     if (!pk.trim()) return;
     savePrivateKey(pk.trim());
+    if (isDesktop && (window as any).suiroboDesktop?.saveKey) {
+      try { await (window as any).suiroboDesktop.saveKey(pk.trim()); } catch { /* agent restart best-effort */ }
+    }
     setPkLoaded(true);
   };
 
@@ -419,7 +426,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
           </p>
         </div>
 
-        <StepDots current={step} total={4} />
+        <StepDots current={isDesktop && step === 4 ? 3 : step} total={isDesktop ? 3 : 4} />
 
         {/* ══════════════ STEP 1 — LOCAL AGENT ══════════════ */}
         {step === 1 && (
@@ -583,7 +590,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
             </div>
 
             {/* Skip — Auto Bot mode needs no AI key */}
-            <button onClick={() => setStep(3)}
+            <button onClick={() => setStep(isDesktop ? 4 : 3)}
               style={{ marginTop: -6, padding: '8px', borderRadius: 8, border: '1px dashed #1e293b', background: 'transparent', color: '#475569', fontSize: '0.72rem', cursor: 'pointer' }}>
               Skip — I'll use ⚡ Auto Bot (no AI key needed) →
             </button>
@@ -664,10 +671,10 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
         {step === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>4</div>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>{isDesktop ? '3' : '4'}</div>
               <div>
-                <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '0.88rem' }}>Auto Bot <span style={{ fontSize: '0.65rem', color: '#475569', fontWeight: 400 }}>(Optional)</span></div>
-                <div style={{ fontSize: '0.68rem', color: '#475569' }}>Allow the bot to auto-sign orders without prompts</div>
+                <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '0.88rem' }}>{isDesktop ? 'Wallet Key' : 'Auto Bot'} <span style={{ fontSize: '0.65rem', color: '#475569', fontWeight: 400 }}>{isDesktop ? '' : '(Optional)'}</span></div>
+                <div style={{ fontSize: '0.68rem', color: '#475569' }}>{isDesktop ? 'The app stores your key and uses it to connect the wallet + sign trades' : 'Allow the bot to auto-sign orders without prompts'}</div>
               </div>
             </div>
 
@@ -692,8 +699,8 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
             {/* Private key */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <label style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>Private Key (for Auto Bot)</label>
-                <PrivacyBadge storage="sessionStorage" />
+                <label style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>{isDesktop ? 'Wallet Private Key' : 'Private Key (for Auto Bot)'}</label>
+                <PrivacyBadge storage={isDesktop ? 'localStorage' : 'sessionStorage'} />
               </div>
 
               {!pkLoaded ? (
@@ -732,15 +739,19 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
             <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 8, padding: '10px 12px', fontSize: '0.68rem', color: '#92400e', lineHeight: 1.7 }}>
               <div style={{ fontWeight: 700, color: '#f59e0b', marginBottom: 4 }}>⚠️ Important note:</div>
               <div style={{ color: '#78716c' }}>
-                • Key stays in <strong>sessionStorage</strong> — cleared when the tab closes<br />
+                {isDesktop
+                  ? <>• Key is stored <strong>encrypted in the app folder on this machine</strong> and never leaves it<br /></>
+                  : <>• Key stays in <strong>sessionStorage</strong> — cleared when the tab closes<br /></>}
                 • The bot will execute orders automatically, <strong>without asking for confirmation</strong><br />
                 • Only use a low-capital wallet for testing. Funds lost are at your own risk.<br />
-                • You can skip this and configure it later in Live Trade
+                {isDesktop
+                  ? <>• The app uses this key to connect the wallet, load balances + the margin panel</>
+                  : <>• You can skip this and configure it later in Live Trade</>}
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStep(3)} style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #1e293b', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>← Back</button>
+              <button onClick={() => setStep(isDesktop ? 2 : 3)} style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #1e293b', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>← Back</button>
               <button onClick={handleFinish}
                 style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', color: '#fff', background: 'linear-gradient(135deg,#10b981,#059669)' }}>
                 {pkLoaded ? '⚡ Finish & Open App →' : '🤖 Skip & Open App →'}

@@ -45,6 +45,10 @@ test-live-repay.ts
 *.exe
 dist-agent/
 
+# Electron desktop build output (portable .exe ~110MB) — distribute via Releases
+release/
+release-build/
+
 # Python agent virtualenv (huge) + caches
 agent/.venv/
 **/__pycache__/

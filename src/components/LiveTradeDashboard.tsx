@@ -301,6 +301,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   // ── Auto Bot (Direct) config ──
   // Private key now lives in userConfig (entered once in SetupWizard step 4).
   // We DON'T re-collect it here — Live Trade only checks status and reads it on Start.
+  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
   const wizardHasKey = userConfig.config.hasPrivateKey;
   // Legacy local state — kept ONLY because the dev-wallet (.env) path still writes
   // through it. Manual-key entry path is removed and these stay default.
@@ -1179,7 +1180,9 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
                 {/* Warning box */}
                 <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', fontSize: '0.7rem', color: '#fca5a5', lineHeight: 1.7 }}>
                   <strong>⚠️ Private Key security:</strong><br/>
-                  • Key is kept in RAM only, <strong>never written to disk</strong><br/>
+                  {isDesktop
+                    ? <>• Key is stored <strong>in this app on your machine</strong>, never sent to a server<br/></>
+                    : <>• Key is kept in RAM only, <strong>never written to disk</strong><br/></>}
                   • Bot self-signs every trade — <strong>no confirmation prompts</strong><br/>
                   • Only use a wallet with small capital for testing. Risk is entirely yours.
                 </div>
@@ -1199,11 +1202,13 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
                           </div>
                         </div>
                         <span style={{ fontSize: '0.62rem', color: '#22c55e', background: 'rgba(34,197,94,0.1)', padding: '2px 8px', borderRadius: 4 }}>
-                          ✓ Loaded from .env
+                          {isDesktop ? '✓ Loaded from app' : '✓ Loaded from .env'}
                         </span>
                       </div>
                       <div style={{ fontSize: '0.65rem', color: '#475569', lineHeight: 1.6 }}>
-                        Key auto-loaded from <code style={{ color: '#f59e0b' }}>.env</code> · No manual entry needed
+                        {isDesktop
+                          ? <>Key loaded from this app on your machine · No manual entry needed</>
+                          : <>Key auto-loaded from <code style={{ color: '#f59e0b' }}>.env</code> · No manual entry needed</>}
                       </div>
                     </div>
                     <button onClick={() => {
@@ -1254,7 +1259,9 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
                       </div>
                       <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.6 }}>
                         Auto Bot needs a Sui private key to self-sign trades. Set it up once in the
-                        Setup Wizard — it's stored in your browser's sessionStorage only, never sent to a server.
+                        Setup Wizard — {isDesktop
+                          ? "it's stored in this app on your machine, never sent to a server."
+                          : "it's stored in your browser's sessionStorage only, never sent to a server."}
                       </div>
                     </div>
                     <button
@@ -1274,6 +1281,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
 
                 {/* ── Optional AI safety check ── off by default → $0 LLM cost ── */}
                 <div style={{
+                  display: isDesktop ? 'none' : undefined,   // desktop app = pure Auto Bot, no AI/API-key layer
                   marginTop: 4, borderRadius: 8, border: '1px solid #1e293b',
                   background: aiCheckEnabled ? 'rgba(77,162,255,0.04)' : '#080d1a',
                 }}>

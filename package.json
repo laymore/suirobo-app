@@ -2,7 +2,10 @@
   "name": "suirobo-app",
   "private": true,
   "version": "1.0.23",
+  "description": "Suirobo — self-custody AI trading bot desktop app",
+  "author": "Team Autobots",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -13,7 +16,35 @@
     "agent:build": "node build_agent.cjs",
     "agent:publish": "node publish_agent.cjs",
     "agent:dist": "npm run agent:build && npm run agent:publish",
-    "deploy": "npx tsx deploy_walrus.ts"
+    "deploy": "npx tsx deploy_walrus.ts",
+    "app": "electron electron/main.cjs",
+    "app:build": "npm run build && npm run agent:build && electron electron/main.cjs",
+    "dist:win": "npm run build && npm run agent:build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "app.autobots.suirobo",
+    "productName": "Suirobo",
+    "directories": {
+      "output": "release-build"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-agent/agent-bundle.cjs",
+        "to": "dist-agent/agent-bundle.cjs"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "dist-agent/suirobo.ico"
+    },
+    "portable": {
+      "artifactName": "Suirobo.exe"
+    }
   },
   "dependencies": {
     "@google/adk": "^1.1.0",
@@ -47,6 +78,8 @@
     "@vercel/ncc": "^0.38.4",
     "@vitejs/plugin-react": "^4.3.4",
     "@yao-pkg/pkg": "^6.20.0",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.0",
     "eslint": "^9.13.0",
     "eslint-plugin-react-hooks": "^5.0.0",
