@@ -199,7 +199,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
       }}>
         <span>🔑 Self-custody — keys stay on your machine</span>
         <span>🌊 Agent + skills source hosted on Walrus</span>
-        <span>🧾 Fees in the open: 0.01 SUI per opened position, closing is free</span>
+        <span>🧾 Build a bot people trade — earn 0.005 SUI per opened position</span>
       </div>
 
       <AgentDownloadModal isOpen={showDownload} onClose={() => setShowDownload(false)} />
