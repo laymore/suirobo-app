@@ -131,7 +131,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
         <span style={{ color: '#1e293b' }}>|</span>
         <span style={{ color: 'var(--text-secondary)' }}>Pairs: SUI/USDC margin · xBTC/USDC</span>
         <span style={{ color: '#1e293b' }}>|</span>
-        <span style={{ color: 'var(--text-secondary)' }}>Fee: 0.01 SUI per open, close free</span>
+        <span style={{ color: 'var(--text-secondary)' }}>Creators earn 0.005 SUI per opened position</span>
       </div>
 
       {/* ── How it works ── */}

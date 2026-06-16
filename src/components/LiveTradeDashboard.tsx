@@ -106,12 +106,91 @@ const Sparkline: React.FC<{ data: number[]; color: string }> = ({ data, color })
 interface ChartCandle { date: string; open: number; high: number; low: number; close: number; volume?: number }
 interface ChartTradeMark { time: string; side: 'LONG' | 'SHORT'; price: number; isClose?: boolean }
 
+// Which overlay indicators are drawn over the candles (user-toggled).
+type OverlayFlags = { ema: boolean; ma: boolean; boll: boolean; st: boolean };
+
+// ── Indicator math — computed client-side from the SAME candles the bot trades ──
+function emaSeries(vals: number[], period: number): (number | null)[] {
+  const k = 2 / (period + 1); const out: (number | null)[] = []; let prev: number | null = null;
+  for (let i = 0; i < vals.length; i++) {
+    if (prev == null) {
+      if (i >= period - 1) { let s = 0; for (let j = i - period + 1; j <= i; j++) s += vals[j]; prev = s / period; out.push(prev); }
+      else out.push(null);
+    } else { prev = vals[i] * k + prev * (1 - k); out.push(prev); }
+  }
+  return out;
+}
+function smaSeries(vals: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  for (let i = 0; i < vals.length; i++) {
+    if (i >= period - 1) { let s = 0; for (let j = i - period + 1; j <= i; j++) s += vals[j]; out.push(s / period); }
+    else out.push(null);
+  }
+  return out;
+}
+function bollSeries(vals: number[], period = 20, mult = 2) {
+  const mid = smaSeries(vals, period); const upper: (number | null)[] = []; const lower: (number | null)[] = [];
+  for (let i = 0; i < vals.length; i++) {
+    const m = mid[i];
+    if (m == null) { upper.push(null); lower.push(null); continue; }
+    let v = 0; for (let j = i - period + 1; j <= i; j++) v += (vals[j] - m) ** 2;
+    const sd = Math.sqrt(v / period);
+    upper.push(m + mult * sd); lower.push(m - mult * sd);
+  }
+  return { mid, upper, lower };
+}
+function atrSeries(candles: ChartCandle[], period: number): (number | null)[] {
+  const tr: number[] = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (i === 0) tr.push(c.high - c.low);
+    else { const pc = candles[i - 1].close; tr.push(Math.max(c.high - c.low, Math.abs(c.high - pc), Math.abs(c.low - pc))); }
+  }
+  const atr: (number | null)[] = []; let prev: number | null = null;
+  for (let i = 0; i < tr.length; i++) {
+    if (i < period - 1) atr.push(null);
+    else if (i === period - 1) { let s = 0; for (let j = 0; j < period; j++) s += tr[j]; prev = s / period; atr.push(prev); }
+    else { prev = (prev! * (period - 1) + tr[i]) / period; atr.push(prev); }
+  }
+  return atr;
+}
+// Classic Supertrend(10,3): line below price (green, dir=1) in an uptrend, above
+// price (red, dir=-1) in a downtrend; flips when close crosses the final band.
+function supertrendSeries(candles: ChartCandle[], period = 10, mult = 3) {
+  const atr = atrSeries(candles, period); const n = candles.length;
+  const fU: (number | null)[] = new Array(n).fill(null);
+  const fL: (number | null)[] = new Array(n).fill(null);
+  const st: (number | null)[] = new Array(n).fill(null);
+  const dir: number[] = new Array(n).fill(1);
+  for (let i = 0; i < n; i++) {
+    const a = atr[i]; if (a == null) continue;
+    const hl2 = (candles[i].high + candles[i].low) / 2;
+    const bU = hl2 + mult * a, bL = hl2 - mult * a;
+    const pU = fU[i - 1], pL = fL[i - 1], pc = candles[i - 1]?.close;
+    fU[i] = (pU == null || bU < pU || (pc != null && pc > pU)) ? bU : pU;
+    fL[i] = (pL == null || bL > pL || (pc != null && pc < pL)) ? bL : pL;
+    const pSt = st[i - 1];
+    if (pSt == null) {
+      if (candles[i].close <= (fU[i] as number)) { dir[i] = -1; st[i] = fU[i]; }
+      else { dir[i] = 1; st[i] = fL[i]; }
+    } else if (pSt === pU) {
+      if (candles[i].close > (fU[i] as number)) { dir[i] = 1; st[i] = fL[i]; }
+      else { dir[i] = -1; st[i] = fU[i]; }
+    } else {
+      if (candles[i].close < (fL[i] as number)) { dir[i] = -1; st[i] = fU[i]; }
+      else { dir[i] = 1; st[i] = fL[i]; }
+    }
+  }
+  return { st, dir };
+}
+
 const CandleChart: React.FC<{
   candles: ChartCandle[];
   position: ActivePos | null;
   marks: ChartTradeMark[];
+  overlays: OverlayFlags;
   height?: number;
-}> = ({ candles, position, marks, height = 220 }) => {
+}> = ({ candles, position, marks, overlays, height = 220 }) => {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -162,6 +241,56 @@ const CandleChart: React.FC<{
       ctx.fillRect(cx - cw / 2, top, cw, bh);
     });
 
+    // ── Indicator overlays (computed on full history, drawn over the visible window) ──
+    const N = view.length;
+    const tail = <T,>(arr: T[]) => arr.slice(-N);
+    const fullCloses = candles.map(c => c.close);
+    const polyline = (vals: (number | null)[], color: string, width = 1.2, dash: number[] = []) => {
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.beginPath();
+      let started = false;
+      vals.forEach((v, i) => {
+        if (v == null) { started = false; return; }
+        const px = x(i), py = y(v);
+        if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+      });
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    if (overlays.boll) {
+      const b = bollSeries(fullCloses, 20, 2);
+      polyline(tail(b.upper), '#64748b', 1);
+      polyline(tail(b.lower), '#64748b', 1);
+      polyline(tail(b.mid), '#475569', 1, [3, 3]);
+    }
+    if (overlays.ma) polyline(tail(smaSeries(fullCloses, 20)), '#a855f7', 1.4);
+    if (overlays.ema) {
+      polyline(tail(emaSeries(fullCloses, 9)), '#f59e0b', 1.4);
+      polyline(tail(emaSeries(fullCloses, 21)), '#3b82f6', 1.4);
+    }
+    if (overlays.st) {
+      const { st, dir } = supertrendSeries(candles, 10, 3);
+      const stV = tail(st), dirV = tail(dir);
+      ctx.lineWidth = 1.8; ctx.setLineDash([]);
+      for (let i = 1; i < stV.length; i++) {
+        if (stV[i] == null || stV[i - 1] == null || dirV[i] !== dirV[i - 1]) continue; // break line at trend flip
+        ctx.strokeStyle = dirV[i] > 0 ? '#22c55e' : '#ef4444';
+        ctx.beginPath(); ctx.moveTo(x(i - 1), y(stV[i - 1] as number)); ctx.lineTo(x(i), y(stV[i] as number)); ctx.stroke();
+      }
+    }
+
+    // Overlay legend (top-left)
+    const legend: [boolean, string, string][] = [
+      [overlays.ema, '#f59e0b', 'EMA9'], [overlays.ema, '#3b82f6', 'EMA21'],
+      [overlays.ma, '#a855f7', 'MA20'], [overlays.boll, '#64748b', 'BOLL'],
+      [overlays.st, '#22c55e', 'ST(10,3)'],
+    ];
+    let lx = PAD_L + 2;
+    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+    legend.filter(l => l[0]).forEach(([, color, label]) => {
+      ctx.fillStyle = color; ctx.fillRect(lx, PAD_T + 1, 7, 3);
+      ctx.fillStyle = '#94a3b8'; ctx.fillText(label, lx + 9, PAD_T + 5);
+      lx += 9 + ctx.measureText(label).width + 8;
+    });
+
     // Position lines: Entry (white dashed) / TP (green) / SL (red)
     if (position) {
       const line = (p: number, color: string, label: string) => {
@@ -199,7 +328,7 @@ const CandleChart: React.FC<{
       const d = new Date(view[i].date);
       ctx.fillText(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`, x(i), H - 5);
     });
-  }, [candles, position, marks]);
+  }, [candles, position, marks, overlays]);
 
   if (candles.length < 2) {
     return (
@@ -333,6 +462,8 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
 
   // ── Chart + Trade History data (from the agent's own endpoints) ──
   const [chartCandles, setChartCandles] = useState<ChartCandle[]>([]);
+  // Indicator overlays drawn over the live candles (Supertrend on by default).
+  const [overlays, setOverlays] = useState<OverlayFlags>({ ema: false, ma: false, boll: false, st: true });
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
   const [closingNow,   setClosingNow]   = useState(false);
 
@@ -1372,10 +1503,34 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
               : chartCandles.length > 0 ? chartCandles[chartCandles.length - 1].close.toLocaleString() : '---'}
           </div>
 
+          {/* Indicator overlay toggles — EMA / MA / Bollinger / Supertrend */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            {([
+              ['ema', 'EMA', '#f59e0b'],
+              ['ma', 'MA', '#a855f7'],
+              ['boll', 'BOLL', '#64748b'],
+              ['st', 'Supertrend', '#22c55e'],
+            ] as const).map(([key, label, color]) => {
+              const on = overlays[key];
+              return (
+                <button key={key} onClick={() => setOverlays(o => ({ ...o, [key]: !o[key] }))}
+                  style={{
+                    fontSize: '0.62rem', fontWeight: 700, padding: '3px 10px', borderRadius: 14, cursor: 'pointer',
+                    border: `1px solid ${on ? color : '#1e293b'}`,
+                    background: on ? `${color}22` : 'transparent',
+                    color: on ? color : '#475569', transition: 'all 0.15s',
+                  }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Candles + Entry/TP/SL lines + ▲▼ trade markers — same data the bot trades on */}
           <CandleChart
             candles={chartCandles}
             position={pos}
+            overlays={overlays}
             marks={tradeHistory.flatMap((r: any) => {
               const m: ChartTradeMark[] = [];
               if (r.openTime)  m.push({ time: r.openTime,  side: r.side, price: r.entry });
