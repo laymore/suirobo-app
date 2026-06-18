@@ -1137,6 +1137,9 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
   const [allMarginAccounts, setAllMarginAccounts] = useState<Array<{
     managerId: string; base: number; quote: number; totalBase: number; totalQuote: number;
     hasDebt: boolean; debtBase: boolean; debtQuote: boolean;
+    // REAL debt amounts (from calculateDebts) — dust borrow-shares can read >0 in
+    // raw shares while the actual debt value is 0, so this is the source of truth.
+    realDebtBase: number; realDebtQuote: number;
   }>>([]);
 
   const refreshMarginPool = React.useCallback(async () => {
@@ -1164,15 +1167,25 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       for (const id of suiUsdcIds) {
         try {
           const d = await getMarginManagerDetail(suiClient, db, id);
+          // REAL debt value (calculateDebts) — raw borrow-shares can be a tiny dust
+          // (single digits) while the actual debt is 0, which falsely reads "SHORT".
+          let realDebtBase = 0, realDebtQuote = 0;
+          try {
+            const debts: any = await (db as any).getMarginManagerDebts(id);
+            realDebtBase = parseFloat(debts?.baseDebt ?? '0') || 0;
+            realDebtQuote = parseFloat(debts?.quoteDebt ?? '0') || 0;
+          } catch { /* leave 0 */ }
+          const hasReal = realDebtBase > 0 || realDebtQuote > 0;
           accounts.push({
             managerId: id, base: d.withdrawableSui, quote: d.withdrawableUsdc,
             totalBase: d.totalSui, totalQuote: d.totalUsdc,
-            hasDebt: d.debtBaseShares > 0n || d.debtQuoteShares > 0n,
-            debtBase: d.debtBaseShares > 0n, debtQuote: d.debtQuoteShares > 0n,
+            hasDebt: hasReal,
+            debtBase: realDebtBase > 0, debtQuote: realDebtQuote > 0,
+            realDebtBase, realDebtQuote,
           });
         } catch { /* skip */ }
       }
-      // Show managers with an open position (debt) first, then the rest.
+      // Show managers with a real open position (debt) first, then the rest.
       accounts.sort((a, b) => Number(b.hasDebt) - Number(a.hasDebt));
       setAllMarginAccounts(accounts);
 
