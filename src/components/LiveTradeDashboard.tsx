@@ -71,9 +71,10 @@ interface LogEntry { id: number; time: string; type: 'info'|'signal'|'trade'|'er
 // Only 3 timeframes for live trading
 const TF_OPTIONS = ['5m', '15m', '30m', '1h'];
 
-// Supported trading pairs
-const PAIR_OPTIONS: { value: string; label: string; tag: string; color: string }[] = [
-  { value: 'XBTC_USDC', label: 'BTC/USDC', tag: 'DeepTrade', color: '#f59e0b' },
+// Supported trading pairs. BTC/USDC is temporarily under maintenance — blocked
+// from Live Trade (not selectable, bot won't trade it) until DeepTrade xBTC is re-enabled.
+const PAIR_OPTIONS: { value: string; label: string; tag: string; color: string; disabled?: boolean }[] = [
+  { value: 'XBTC_USDC', label: 'BTC/USDC', tag: 'DeepTrade', color: '#f59e0b', disabled: true },
   { value: 'SUI_USDC',  label: 'SUI/USDC', tag: 'DeepBook',  color: '#00d4ff' },
 ];
 const PAIR_LABEL = (p: string) => PAIR_OPTIONS.find(o => o.value === p)?.label ?? p.replace('_', '/');
@@ -385,7 +386,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   // ── Shared config ──
   const [botSkills,     setBotSkills]     = useState<BotSkillConfig[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<BotSkillConfig | null>(null);
-  const [pair,          setPair]          = useState('XBTC_USDC');
+  const [pair,          setPair]          = useState('SUI_USDC'); // BTC/USDC under maintenance
   const [timeframe,     setTimeframe]     = useState('15m');
   const [capitalSUI,    setCapitalSUI]    = useState(0.5);
   const [showConfig,    setShowConfig]    = useState(true);
@@ -530,8 +531,9 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   // from accidentally running a SUI-tuned strategy on the BTC pair.
   useEffect(() => {
     if (!selectedSkill) return;
+    // BTC/USDC is under maintenance → never auto-switch to it; keep SUI_USDC.
     if (selectedSkill.preferredAsset === 'sui') setPair('SUI_USDC');
-    else if (selectedSkill.preferredAsset === 'btc') setPair('XBTC_USDC');
+    else if (selectedSkill.preferredAsset === 'btc' && !PAIR_OPTIONS.find(o => o.value === 'XBTC_USDC')?.disabled) setPair('XBTC_USDC');
     // Map backtest TF label (M30/H1) → live TF (30m/1h)
     const tfMap: Record<string, string> = { M5: '5m', M15: '15m', M30: '30m', H1: '1h' };
     const pref = selectedSkill.preferredTimeframe;
@@ -963,6 +965,24 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   const sc  = s.signal === 'BUY' ? '#22c55e' : s.signal === 'SELL' ? '#ef4444' : '#475569';
   const activeMode: BotMode = (s as any).mode || mode;
 
+  // The agent only writes an "open" trade record in direct mode; the agent-sign /
+  // xBTC paths don't. So if there's a live open position that isn't already in the
+  // fetched history, synthesize an "open" row from it so the user always sees the
+  // currently-open trade in Trade History (and as an entry marker on the chart).
+  const displayHistory = (() => {
+    if (!pos) return tradeHistory;
+    if (tradeHistory.some((r: any) => r.closeTime == null)) return tradeHistory; // agent already recorded it
+    const openRow = {
+      id: 'live-open', openTime: pos.entryTime, closeTime: null,
+      side: pos.type, pair: s.config?.pair ?? '',
+      entry: pos.entryPrice, exit: null,
+      pnlPct: pos.unrealizedPct ?? null, pnlVal: pos.unrealizedPnl ?? null,
+      reason: null, openTx: null, closeTx: null,
+      skill: s.config?.botSkillName ?? s.config?.skillName ?? '',
+    };
+    return [openRow, ...tradeHistory];
+  })();
+
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: '#060e1e', minHeight: '100vh', fontFamily: "'Inter',sans-serif" }}>
@@ -1048,15 +1068,21 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
               <label style={{ fontSize: '0.68rem', color: '#64748b', display: 'block', marginBottom: 4 }}>Trading Pair</label>
               <div style={{ display: 'flex', gap: 4 }}>
                 {PAIR_OPTIONS.map(p => (
-                  <button key={p.value} onClick={() => setPair(p.value)} style={{
-                    flex: 1, padding: '6px 4px', borderRadius: 6, cursor: 'pointer',
+                  <button key={p.value}
+                    onClick={() => { if (!p.disabled) setPair(p.value); }}
+                    disabled={p.disabled}
+                    title={p.disabled ? 'BTC/USDC is temporarily under maintenance' : undefined}
+                    style={{
+                    flex: 1, padding: '6px 4px', borderRadius: 6,
+                    cursor: p.disabled ? 'not-allowed' : 'pointer',
+                    opacity: p.disabled ? 0.45 : 1,
                     border: `1px solid ${pair === p.value ? p.color + '88' : '#1e293b'}`,
                     background: pair === p.value ? p.color + '18' : 'transparent',
                     color: pair === p.value ? p.color : '#475569',
                     fontSize: '0.7rem', fontWeight: pair === p.value ? 700 : 400,
                   }}>
                     <div>{p.label}</div>
-                    <div style={{ fontSize: '0.55rem', opacity: 0.7 }}>{p.tag}</div>
+                    <div style={{ fontSize: '0.55rem', opacity: 0.7 }}>{p.disabled ? '🛠 Maintenance' : p.tag}</div>
                   </button>
                 ))}
               </div>
@@ -1531,7 +1557,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
             candles={chartCandles}
             position={pos}
             overlays={overlays}
-            marks={tradeHistory.flatMap((r: any) => {
+            marks={displayHistory.flatMap((r: any) => {
               const m: ChartTradeMark[] = [];
               if (r.openTime)  m.push({ time: r.openTime,  side: r.side, price: r.entry });
               if (r.closeTime && r.exit != null) m.push({ time: r.closeTime, side: r.side, price: r.exit, isClose: true });
@@ -1699,7 +1725,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
         <div style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 12, padding: 14, margin: 4 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <div style={{ fontSize: '0.6rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
-              📜 Trade History ({tradeHistory.length})
+              📜 Trade History ({displayHistory.length})
             </div>
             <button onClick={refreshChartData}
               style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid #1e293b', background: 'transparent', color: '#334155', fontSize: '0.62rem', cursor: 'pointer' }}>
@@ -1707,7 +1733,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
             </button>
           </div>
 
-          {tradeHistory.length === 0 ? (
+          {displayHistory.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '14px 0', fontSize: '0.72rem', color: '#1e293b' }}>
               No trades yet — records appear here when the bot opens its first position.
             </div>
@@ -1722,7 +1748,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
                   </tr>
                 </thead>
                 <tbody>
-                  {tradeHistory.slice(0, 25).map((r: any) => (
+                  {displayHistory.slice(0, 25).map((r: any) => (
                     <tr key={r.id} style={{ color: '#94a3b8' }}>
                       <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontSize: '0.62rem', whiteSpace: 'nowrap' }}>
                         {new Date(r.openTime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

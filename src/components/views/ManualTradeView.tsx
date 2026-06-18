@@ -7,6 +7,7 @@ import { DeepBookClient } from '@mysten/deepbook-v3';
 import { SuiJsonRpcClient as SuiClient } from '@mysten/sui/jsonRpc';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { getMarginManagerDetail, pickBestSuiUsdcManager } from '../../utils/marginDetail';
+import { fetchMarginOrders, getInternalBalanceManagerId, type MarginOrder } from '../../utils/deepbookMarginIndexer';
 
 // ── HELPERS ──
 
@@ -438,6 +439,7 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
 
   const [marginPositions, setMarginPositions] = useState<Position[]>([]);
   const [predictPositions, setPredictPositions] = useState<PredictPos[]>([]);
+
 
   // ── LOAD INITIAL DATA ──
   useEffect(() => {
@@ -1066,14 +1068,17 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
     hasDebt: boolean; debtBase: boolean; debtQuote: boolean;
   } | null>(null);
   const [marginPoolBusy,   setMarginPoolBusy]   = useState(false);
+  // Real DeepBook margin orders (open/filled/canceled) for the wallet's manager,
+  // pulled straight from the DeepBook indexer — works even with the agent offline.
+  const [marginOrders, setMarginOrders] = useState<MarginOrder[]>([]);
 
   const refreshMarginPool = React.useCallback(async () => {
-    if (!account?.address) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); return; }
+    if (!account?.address) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); setMarginOrders([]); return; }
     try {
       const discover = new DeepBookClient({ client: suiClient as any, network: 'mainnet', address: account.address });
       const ids = await discover.getMarginManagerIdsForOwner(account.address);
       const mgr = await pickBestSuiUsdcManager(suiClient, ids);
-      if (!mgr) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); return; }
+      if (!mgr) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); setMarginOrders([]); return; }
       setSuiUsdcManagerId(mgr);
       const db = new DeepBookClient({
         client: suiClient as any, network: 'mainnet', address: account.address,
@@ -1087,6 +1092,12 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
         debtBase: d.debtBaseShares > 0n,
         debtQuote: d.debtQuoteShares > 0n,
       });
+      // Real DeepBook orders for this manager (open/filled/canceled). Margin orders
+      // are indexed under the manager's INTERNAL balance manager id.
+      try {
+        const bmId = await getInternalBalanceManagerId(suiClient, mgr);
+        setMarginOrders(bmId ? await fetchMarginOrders(bmId, 50) : []);
+      } catch { setMarginOrders([]); }
     } catch (e) {
       console.error('[ManualTrade·marginPool] refresh error:', e);
     }
@@ -2401,77 +2412,111 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
           </div>
         )}
 
-        {/* MARGIN POSITIONS TABLE */}
+        {/* MARGIN POSITION (on-chain) + DEEPBOOK ORDERS (indexer) — shared with the bot, agent-independent */}
         {tab === 'margin' && (
-          <div style={{ background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'hidden' }}>
-            {marginPositions.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
-                <span style={{ fontSize: '1.5rem' }}>ℹ️</span>
-                <span>No margin positions open.</span>
-                <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px', borderRadius: '8px', maxWidth: '400px', color: '#93c5fd' }}>
-                  <strong>Note:</strong> DeepBook V3 is the canonical spot DEX on SUI. Margin positions created on <strong>deeptrade.io</strong> use their own smart contracts and liquidation engine, and are not yet synced into this open-source Local Client.
-                </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Current on-chain margin position (same SUI/USDC manager the bot trades) */}
+            <div style={{ background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700 }}>
+                💼 Margin Position (SUI/USDC) — read on-chain
+                <span style={{ marginLeft: 'auto', fontSize: '0.66rem', fontWeight: 600, color: marginPoolAssets?.hasDebt ? '#22c55e' : '#64748b' }}>
+                  {marginPoolAssets?.hasDebt ? '● leveraged' : suiUsdcManagerId ? '○ collateral only' : '— no manager'}
+                </span>
+                <button onClick={() => refreshMarginPool()} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid #1e293b', background: 'transparent', color: '#64748b', fontSize: '0.62rem', cursor: 'pointer' }}>↻ Refresh</button>
               </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #1e293b', color: '#64748b', background: '#090d16' }}>
-                    <th style={{ padding: 14 }}>Pair</th>
-                    <th style={{ padding: 14 }}>Type</th>
-                    <th style={{ padding: 14 }}>Collateral</th>
-                    <th style={{ padding: 14 }}>Size</th>
-                    <th style={{ padding: 14 }}>Entry</th>
-                    <th style={{ padding: 14 }}>Debt</th>
-                    <th style={{ padding: 14 }}>Liq. price</th>
-                    <th style={{ padding: 14 }}>Health</th>
-                    <th style={{ padding: 14 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {marginPositions.map((pos, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #1e293b', color: '#e2e8f0' }}>
-                      <td style={{ padding: 14, fontWeight: 'bold' }}>SUI/USDC</td>
-                      <td style={{ padding: 14, color: pos.type === 'SHORT' ? '#ef4444' : '#22c55e', fontWeight: 'bold' }}>
-                        {pos.type || 'LONG'}
-                      </td>
-                      <td style={{ padding: 14, fontFamily: 'monospace' }}>{pos.collateral} SUI</td>
-                      <td style={{ padding: 14, fontFamily: 'monospace' }}>{pos.size || (parseFloat(pos.collateral) * 3).toFixed(1)} SUI</td>
-                      <td style={{ padding: 14, fontFamily: 'monospace' }}>${pos.entryPrice || (suiPrice ? suiPrice.toFixed(3) : '—')}</td>
-                      <td style={{ padding: 14, fontFamily: 'monospace' }}>{pos.debt} USDC</td>
-                      <td style={{ padding: 14, color: '#ef4444', fontWeight: 600, fontFamily: 'monospace' }}>
-                        ${pos.liqPrice || '2.530'}
-                      </td>
-                      <td style={{ padding: 14 }}>
-                        <span style={{
-                          background: 'rgba(34,197,94,0.1)', color: '#22c55e',
-                          padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 'bold'
-                        }}>{pos.healthFactor}</span>
-                      </td>
-                      <td style={{ padding: 14, display: 'flex', gap: 6 }}>
-                        <button
-                          onClick={() => handleCloseMarginPosition(pos, idx)}
-                          style={{
-                            background: '#ef444422', border: '1px solid #ef4444', color: '#ef4444',
-                            padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem'
-                          }}
-                        >
-                          Close
-                        </button>
-                        <button
-                          onClick={() => onAskAgent(`Watch this SUI margin position closely (collateral ${pos.collateral} SUI)`)}
-                          style={{
-                            background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff',
-                            padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem'
-                          }}
-                        >
-                          AI monitor
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+              {!suiUsdcManagerId ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
+                  No SUI/USDC margin manager found for this wallet. Open a margin position above (or run the bot) to create one.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #1e293b', color: '#64748b', background: '#090d16' }}>
+                        {['Pair', 'Type', 'Total assets', 'Liquid (withdrawable)', 'Borrowed', 'Price', 'Manager', 'Actions'].map(h => (
+                          <th key={h} style={{ padding: 12 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ color: '#e2e8f0' }}>
+                        <td style={{ padding: 12, fontWeight: 700 }}>SUI/USDC</td>
+                        <td style={{ padding: 12, fontWeight: 700, color: marginPoolAssets?.debtBase ? '#ef4444' : '#22c55e' }}>
+                          {marginPoolAssets?.hasDebt ? (marginPoolAssets?.debtBase ? 'SHORT' : 'LONG') : '—'}
+                        </td>
+                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{(marginPoolAssets?.totalBase ?? 0).toFixed(4)} SUI · {(marginPoolAssets?.totalQuote ?? 0).toFixed(2)} USDC</td>
+                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{(marginPoolAssets?.base ?? 0).toFixed(4)} SUI · {(marginPoolAssets?.quote ?? 0).toFixed(2)} USDC</td>
+                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{marginPoolAssets?.hasDebt ? (marginPoolAssets?.debtBase ? 'SUI (short)' : 'USDC (long)') : '—'}</td>
+                        <td style={{ padding: 12, fontFamily: 'monospace' }}>${suiPrice ? suiPrice.toFixed(4) : '—'}</td>
+                        <td style={{ padding: 12, fontSize: '0.7rem' }}>
+                          <a href={`https://suiscan.xyz/mainnet/object/${suiUsdcManagerId}`} target="_blank" rel="noreferrer" style={{ color: '#00d4ff', textDecoration: 'none', fontFamily: 'monospace' }}>
+                            {suiUsdcManagerId.slice(0, 6)}…{suiUsdcManagerId.slice(-4)}↗
+                          </a>
+                        </td>
+                        <td style={{ padding: 12 }}>
+                          <button
+                            onClick={() => onAskAgent('Analyze and, if needed, help me close my SUI/USDC margin position')}
+                            style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+                            AI monitor
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Real DeepBook orders (open / filled / canceled) from the DeepBook indexer */}
+            <div style={{ background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700 }}>
+                📒 DeepBook Orders — open · filled · canceled <span style={{ color: '#64748b', fontWeight: 500 }}>({marginOrders.length})</span>
+              </div>
+              {marginOrders.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>
+                  {suiUsdcManagerId
+                    ? 'No DeepBook margin orders recorded for this manager yet.'
+                    : 'Connect a wallet with a SUI/USDC margin manager to see its order history.'}
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #1e293b', color: '#64748b', background: '#090d16' }}>
+                        {['Time', 'Side', 'Price', 'Size', 'Filled', 'Status'].map(h => (
+                          <th key={h} style={{ padding: 12 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {marginOrders.slice(0, 40).map((o) => {
+                        const isBuy = /buy/i.test(o.type);
+                        const st = o.current_status;
+                        return (
+                          <tr key={o.order_id} style={{ borderBottom: '1px solid #1e293b', color: '#e2e8f0' }}>
+                            <td style={{ padding: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+                              {o.placed_at ? new Date(o.placed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </td>
+                            <td style={{ padding: 12, fontWeight: 700, color: isBuy ? '#22c55e' : '#ef4444' }}>{isBuy ? 'BUY' : 'SELL'}</td>
+                            <td style={{ padding: 12, fontFamily: 'monospace' }}>${Number(o.price).toFixed(4)}</td>
+                            <td style={{ padding: 12, fontFamily: 'monospace' }}>{Number(o.original_quantity).toFixed(2)}</td>
+                            <td style={{ padding: 12, fontFamily: 'monospace' }}>{Number(o.filled_quantity).toFixed(2)}</td>
+                            <td style={{ padding: 12 }}>
+                              <span style={{
+                                background: st === 'Filled' ? 'rgba(34,197,94,0.1)' : st === 'Canceled' ? 'rgba(100,116,139,0.15)' : 'rgba(245,158,11,0.1)',
+                                color: st === 'Filled' ? '#22c55e' : st === 'Canceled' ? '#94a3b8' : '#f59e0b',
+                                padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 700,
+                              }}>{st}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
