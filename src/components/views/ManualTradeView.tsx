@@ -1071,33 +1071,71 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
   // Real DeepBook margin orders (open/filled/canceled) for the wallet's manager,
   // pulled straight from the DeepBook indexer — works even with the agent offline.
   const [marginOrders, setMarginOrders] = useState<MarginOrder[]>([]);
+  // ALL of the wallet's SUI/USDC margin managers (a wallet can own several —
+  // e.g. an old short + a new long). Show every one so no position is hidden.
+  const [allMarginAccounts, setAllMarginAccounts] = useState<Array<{
+    managerId: string; base: number; quote: number; totalBase: number; totalQuote: number;
+    hasDebt: boolean; debtBase: boolean; debtQuote: boolean;
+  }>>([]);
 
   const refreshMarginPool = React.useCallback(async () => {
-    if (!account?.address) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); setMarginOrders([]); return; }
+    const clear = () => { setSuiUsdcManagerId(null); setMarginPoolAssets(null); setMarginOrders([]); setAllMarginAccounts([]); };
+    if (!account?.address) { clear(); return; }
     try {
       const discover = new DeepBookClient({ client: suiClient as any, network: 'mainnet', address: account.address });
       const ids = await discover.getMarginManagerIdsForOwner(account.address);
-      const mgr = await pickBestSuiUsdcManager(suiClient, ids);
-      if (!mgr) { setSuiUsdcManagerId(null); setMarginPoolAssets(null); setMarginOrders([]); return; }
-      setSuiUsdcManagerId(mgr);
-      const db = new DeepBookClient({
-        client: suiClient as any, network: 'mainnet', address: account.address,
-        marginManagers: { [mgr]: { marginManagerKey: mgr, address: mgr, poolKey: 'SUI_USDC' } } as any,
+      // Keep only SUI/USDC MarginManagers (a wallet may own managers for other pools).
+      const suiUsdcIds: string[] = [];
+      for (const id of ids) {
+        try {
+          const obj = await suiClient.getObject({ id, options: { showType: true } });
+          const t: string = obj?.data?.type ?? '';
+          if (/::margin_manager::MarginManager</.test(t) && /::sui::SUI[,>]/.test(t) && /::usdc::USDC[,>]/.test(t)) suiUsdcIds.push(id);
+        } catch { /* skip unreadable */ }
+      }
+      if (suiUsdcIds.length === 0) { clear(); return; }
+
+      // One dbClient with EVERY manager mapped → calculateAssets totals resolve per id.
+      const managersMap = Object.fromEntries(suiUsdcIds.map(id => [id, { marginManagerKey: id, address: id, poolKey: 'SUI_USDC' }]));
+      const db = new DeepBookClient({ client: suiClient as any, network: 'mainnet', address: account.address, marginManagers: managersMap as any });
+
+      const accounts: typeof allMarginAccounts = [];
+      for (const id of suiUsdcIds) {
+        try {
+          const d = await getMarginManagerDetail(suiClient, db, id);
+          accounts.push({
+            managerId: id, base: d.withdrawableSui, quote: d.withdrawableUsdc,
+            totalBase: d.totalSui, totalQuote: d.totalUsdc,
+            hasDebt: d.debtBaseShares > 0n || d.debtQuoteShares > 0n,
+            debtBase: d.debtBaseShares > 0n, debtQuote: d.debtQuoteShares > 0n,
+          });
+        } catch { /* skip */ }
+      }
+      // Show managers with an open position (debt) first, then the rest.
+      accounts.sort((a, b) => Number(b.hasDebt) - Number(a.hasDebt));
+      setAllMarginAccounts(accounts);
+
+      // Best one drives the deposit/withdraw panel (unchanged behaviour).
+      const best = (await pickBestSuiUsdcManager(suiClient, suiUsdcIds)) || suiUsdcIds[0];
+      setSuiUsdcManagerId(best);
+      const bestAcc = accounts.find(a => a.managerId === best) || accounts[0];
+      if (bestAcc) setMarginPoolAssets({
+        base: bestAcc.base, quote: bestAcc.quote, totalBase: bestAcc.totalBase, totalQuote: bestAcc.totalQuote,
+        hasDebt: bestAcc.hasDebt, debtBase: bestAcc.debtBase, debtQuote: bestAcc.debtQuote,
       });
-      const d = await getMarginManagerDetail(suiClient, db, mgr);
-      setMarginPoolAssets({
-        base: d.withdrawableSui, quote: d.withdrawableUsdc,
-        totalBase: d.totalSui, totalQuote: d.totalUsdc,
-        hasDebt: d.debtBaseShares > 0n || d.debtQuoteShares > 0n,
-        debtBase: d.debtBaseShares > 0n,
-        debtQuote: d.debtQuoteShares > 0n,
-      });
-      // Real DeepBook orders for this manager (open/filled/canceled). Margin orders
-      // are indexed under the manager's INTERNAL balance manager id.
-      try {
-        const bmId = await getInternalBalanceManagerId(suiClient, mgr);
-        setMarginOrders(bmId ? await fetchMarginOrders(bmId, 50) : []);
-      } catch { setMarginOrders([]); }
+
+      // DeepBook orders for every manager — try BOTH the internal balance manager id
+      // and the manager id itself (margin order attribution varies), merged + de-duped.
+      const allOrders: MarginOrder[] = [];
+      for (const a of accounts) {
+        try {
+          const bmId = await getInternalBalanceManagerId(suiClient, a.managerId);
+          if (bmId) allOrders.push(...await fetchMarginOrders(bmId, 50));
+          allOrders.push(...await fetchMarginOrders(a.managerId, 50));
+        } catch { /* skip */ }
+      }
+      const seen = new Set<string>();
+      setMarginOrders(allOrders.filter(o => o.order_id && !seen.has(o.order_id) && seen.add(o.order_id)));
     } catch (e) {
       console.error('[ManualTrade·marginPool] refresh error:', e);
     }
@@ -2419,13 +2457,15 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
             {/* Current on-chain margin position (same SUI/USDC manager the bot trades) */}
             <div style={{ background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'hidden' }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700 }}>
-                💼 Margin Position (SUI/USDC) — read on-chain
-                <span style={{ marginLeft: 'auto', fontSize: '0.66rem', fontWeight: 600, color: marginPoolAssets?.hasDebt ? '#22c55e' : '#64748b' }}>
-                  {marginPoolAssets?.hasDebt ? '● leveraged' : suiUsdcManagerId ? '○ collateral only' : '— no manager'}
+                💼 Margin Positions (SUI/USDC) — read on-chain
+                <span style={{ marginLeft: 'auto', fontSize: '0.66rem', fontWeight: 600, color: allMarginAccounts.some(a => a.hasDebt) ? '#22c55e' : '#64748b' }}>
+                  {allMarginAccounts.length === 0
+                    ? '— no manager'
+                    : `${allMarginAccounts.length} account${allMarginAccounts.length > 1 ? 's' : ''} · ${allMarginAccounts.filter(a => a.hasDebt).length} with open position`}
                 </span>
                 <button onClick={() => refreshMarginPool()} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid #1e293b', background: 'transparent', color: '#64748b', fontSize: '0.62rem', cursor: 'pointer' }}>↻ Refresh</button>
               </div>
-              {!suiUsdcManagerId ? (
+              {allMarginAccounts.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
                   No SUI/USDC margin manager found for this wallet. Open a margin position above (or run the bot) to create one.
                 </div>
@@ -2440,28 +2480,30 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                       </tr>
                     </thead>
                     <tbody>
-                      <tr style={{ color: '#e2e8f0' }}>
-                        <td style={{ padding: 12, fontWeight: 700 }}>SUI/USDC</td>
-                        <td style={{ padding: 12, fontWeight: 700, color: marginPoolAssets?.debtBase ? '#ef4444' : '#22c55e' }}>
-                          {marginPoolAssets?.hasDebt ? (marginPoolAssets?.debtBase ? 'SHORT' : 'LONG') : '—'}
-                        </td>
-                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{(marginPoolAssets?.totalBase ?? 0).toFixed(4)} SUI · {(marginPoolAssets?.totalQuote ?? 0).toFixed(2)} USDC</td>
-                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{(marginPoolAssets?.base ?? 0).toFixed(4)} SUI · {(marginPoolAssets?.quote ?? 0).toFixed(2)} USDC</td>
-                        <td style={{ padding: 12, fontFamily: 'monospace' }}>{marginPoolAssets?.hasDebt ? (marginPoolAssets?.debtBase ? 'SUI (short)' : 'USDC (long)') : '—'}</td>
-                        <td style={{ padding: 12, fontFamily: 'monospace' }}>${suiPrice ? suiPrice.toFixed(4) : '—'}</td>
-                        <td style={{ padding: 12, fontSize: '0.7rem' }}>
-                          <a href={`https://suiscan.xyz/mainnet/object/${suiUsdcManagerId}`} target="_blank" rel="noreferrer" style={{ color: '#00d4ff', textDecoration: 'none', fontFamily: 'monospace' }}>
-                            {suiUsdcManagerId.slice(0, 6)}…{suiUsdcManagerId.slice(-4)}↗
-                          </a>
-                        </td>
-                        <td style={{ padding: 12 }}>
-                          <button
-                            onClick={() => onAskAgent('Analyze and, if needed, help me close my SUI/USDC margin position')}
-                            style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
-                            AI monitor
-                          </button>
-                        </td>
-                      </tr>
+                      {allMarginAccounts.map((a) => (
+                        <tr key={a.managerId} style={{ color: '#e2e8f0', borderTop: '1px solid #1e293b' }}>
+                          <td style={{ padding: 12, fontWeight: 700 }}>SUI/USDC</td>
+                          <td style={{ padding: 12, fontWeight: 700, color: !a.hasDebt ? '#64748b' : a.debtBase ? '#ef4444' : '#22c55e' }}>
+                            {a.hasDebt ? (a.debtBase ? 'SHORT' : 'LONG') : '—'}
+                          </td>
+                          <td style={{ padding: 12, fontFamily: 'monospace' }}>{a.totalBase.toFixed(4)} SUI · {a.totalQuote.toFixed(2)} USDC</td>
+                          <td style={{ padding: 12, fontFamily: 'monospace' }}>{a.base.toFixed(4)} SUI · {a.quote.toFixed(2)} USDC</td>
+                          <td style={{ padding: 12, fontFamily: 'monospace' }}>{a.hasDebt ? (a.debtBase ? 'SUI (short)' : 'USDC (long)') : '—'}</td>
+                          <td style={{ padding: 12, fontFamily: 'monospace' }}>${suiPrice ? suiPrice.toFixed(4) : '—'}</td>
+                          <td style={{ padding: 12, fontSize: '0.7rem' }}>
+                            <a href={`https://suiscan.xyz/mainnet/object/${a.managerId}`} target="_blank" rel="noreferrer" style={{ color: '#00d4ff', textDecoration: 'none', fontFamily: 'monospace' }}>
+                              {a.managerId.slice(0, 6)}…{a.managerId.slice(-4)}↗
+                            </a>
+                          </td>
+                          <td style={{ padding: 12 }}>
+                            <button
+                              onClick={() => onAskAgent('Analyze and, if needed, help me close my SUI/USDC margin position')}
+                              style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+                              AI monitor
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -2474,9 +2516,9 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                 📒 DeepBook Orders — open · filled · canceled <span style={{ color: '#64748b', fontWeight: 500 }}>({marginOrders.length})</span>
               </div>
               {marginOrders.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>
-                  {suiUsdcManagerId
-                    ? 'No DeepBook margin orders recorded for this manager yet.'
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                  {allMarginAccounts.length > 0
+                    ? <>No resting DeepBook orders for your manager(s).<br/>Margin opens/closes are <strong>market fills</strong> — they settle instantly and show as the <strong>position above</strong>, not as standing orders.</>
                     : 'Connect a wallet with a SUI/USDC margin manager to see its order history.'}
                 </div>
               ) : (
