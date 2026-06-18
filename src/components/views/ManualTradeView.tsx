@@ -955,6 +955,62 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
     }
   };
 
+  // ── Repay the FULL debt of a specific margin manager (one tx, from wallet) ──
+  // Same proven path as the "Repay all" button: repayBase/repayQuote(undefined) →
+  // contract repays the entire debt, coins pulled from the wallet automatically.
+  const handleMarginRepayAll = async (a: { managerId: string; debtBase: boolean; debtQuote: boolean }) => {
+    if (!account) return showToast('Connect your wallet first!', 'error');
+    if (!a.debtBase && !a.debtQuote) return showToast('This account has no debt to repay.', 'info');
+    setMarginPoolBusy(true);
+    showToast('Repaying all outstanding debt…', 'info');
+    try {
+      const db = new DeepBookClient({
+        client: suiClient as any, network: 'mainnet', address: account.address,
+        marginManagers: { [a.managerId]: { marginManagerKey: a.managerId, address: a.managerId, poolKey: 'SUI_USDC' } } as any,
+      });
+      const tx = new Transaction();
+      await fetchAndInjectVAA(tx, 'SUI_USDC');
+      if (a.debtBase)  db.marginManager.repayBase(a.managerId, undefined as any)(tx);
+      if (a.debtQuote) db.marginManager.repayQuote(a.managerId, undefined as any)(tx);
+      const signed = await signTx({ transaction: tx });
+      const res = await suiClient.executeTransactionBlock({ transactionBlock: signed.bytes, signature: signed.signature, options: { showEffects: true } });
+      if (res.effects?.status?.status === 'success') { showToast('Debt repaid — collateral unlocked.', 'success'); await refreshMarginPool(); }
+      else throw new Error(res.effects?.status?.error || 'tx failed');
+    } catch (e: any) {
+      showToast(`Repay failed: ${(e.message || e).toString().slice(0, 140)}`, 'error');
+    } finally { setMarginPoolBusy(false); }
+  };
+
+  // ── Close a margin account all-in (one tx): repay full debt + withdraw everything ──
+  // Repay pulls from the wallet (no collateral swap yet — that needs a margin market
+  // order). After repay the collateral is liquid, so we withdraw the full valuation.
+  const handleMarginCloseAccount = async (a: {
+    managerId: string; debtBase: boolean; debtQuote: boolean; totalBase: number; totalQuote: number;
+  }) => {
+    if (!account) return showToast('Connect your wallet first!', 'error');
+    setMarginPoolBusy(true);
+    showToast('Closing position — repaying debt + withdrawing collateral…', 'info');
+    try {
+      const db = new DeepBookClient({
+        client: suiClient as any, network: 'mainnet', address: account.address,
+        marginManagers: { [a.managerId]: { marginManagerKey: a.managerId, address: a.managerId, poolKey: 'SUI_USDC' } } as any,
+      });
+      const tx = new Transaction();
+      await fetchAndInjectVAA(tx, 'SUI_USDC');
+      if (a.debtBase)  db.marginManager.repayBase(a.managerId, undefined as any)(tx);
+      if (a.debtQuote) db.marginManager.repayQuote(a.managerId, undefined as any)(tx);
+      // Withdraw everything that's now unlocked, back to the wallet.
+      if (a.totalBase > 0)  { const c = db.marginManager.withdrawBase(a.managerId, a.totalBase)(tx);   tx.transferObjects([c], tx.pure.address(account.address)); }
+      if (a.totalQuote > 0) { const c = db.marginManager.withdrawQuote(a.managerId, a.totalQuote)(tx); tx.transferObjects([c], tx.pure.address(account.address)); }
+      const signed = await signTx({ transaction: tx });
+      const res = await suiClient.executeTransactionBlock({ transactionBlock: signed.bytes, signature: signed.signature, options: { showEffects: true } });
+      if (res.effects?.status?.status === 'success') { showToast('Position closed — debt repaid, collateral returned.', 'success'); await refreshMarginPool(); }
+      else throw new Error(res.effects?.status?.error || 'tx failed');
+    } catch (e: any) {
+      showToast(`Close failed: ${(e.message || e).toString().slice(0, 160)}`, 'error');
+    } finally { setMarginPoolBusy(false); }
+  };
+
   const handleRedeemPredict = async (pos: PredictPos, idx: number) => {
     if (!account) return showToast('Connect your wallet first!', 'error');
     setIsExecuting(true);
@@ -1243,10 +1299,10 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
   // `setMarginColAction` (React state updates are async — reading state inside
   // the same tick still sees the OLD value, which made the Withdraw button
   // act like Deposit on the first click).
-  const handleMarginCollateralAction = async (actionOverride?: 'deposit' | 'withdraw') => {
+  const handleMarginCollateralAction = async (actionOverride?: 'deposit' | 'withdraw', amountOverride?: number) => {
     if (!account) return showToast('Connect your wallet first!', 'error');
     const action = actionOverride ?? marginColAction;
-    const amt = parseFloat(marginColAmount);
+    const amt = amountOverride ?? parseFloat(marginColAmount);
     if (!amt || amt <= 0) return showToast('Enter a valid amount!', 'error');
 
     if (action === 'deposit') {
@@ -1678,10 +1734,17 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                     padding: '8px 14px', borderRadius: 8, border: 'none', background: '#22c55e',
                     color: '#000', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer'
                   }}>⬆️ Deposit</button>
-                  <button onClick={() => { setMarginColAction('withdraw'); handleMarginCollateralAction('withdraw'); }} style={{
+                  <button onClick={() => {
+                    setMarginColAction('withdraw');
+                    // Withdraw ALL of the selected collateral's liquid balance in one click.
+                    const liquid = marginColAsset === 'SUI' ? (marginPoolAssets?.base ?? 0) : (marginPoolAssets?.quote ?? 0);
+                    if (liquid <= 0) return showToast(`No liquid ${marginColAsset} to withdraw.`, 'info');
+                    setMarginColAmount(liquid.toFixed(6));
+                    handleMarginCollateralAction('withdraw', liquid);
+                  }} style={{
                     padding: '8px 14px', borderRadius: 8, border: 'none', background: '#ef4444',
-                    color: '#fff', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer'
-                  }}>⬇️ Withdraw</button>
+                    color: '#fff', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer', whiteSpace: 'nowrap'
+                  }}>⬇️ Withdraw all</button>
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   {[25, 50, 75, 100].map(pct => (
@@ -2496,11 +2559,29 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                             </a>
                           </td>
                           <td style={{ padding: 12 }}>
-                            <button
-                              onClick={() => onAskAgent('Analyze and, if needed, help me close my SUI/USDC margin position')}
-                              style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
-                              AI monitor
-                            </button>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {a.hasDebt && (
+                                <button
+                                  onClick={() => handleMarginRepayAll(a)}
+                                  disabled={marginPoolBusy}
+                                  title="Repay the full debt from your wallet (one transaction)"
+                                  style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: '#fbbf24', padding: '4px 10px', borderRadius: 6, cursor: marginPoolBusy ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>
+                                  💳 Repay
+                                </button>
+                              )}
+                              <button
+                                onClick={() => { if (window.confirm('Close this position?\n\nThis repays the full debt from your wallet and withdraws all collateral back to your wallet, in one transaction.')) handleMarginCloseAccount(a); }}
+                                disabled={marginPoolBusy}
+                                title="Repay debt + withdraw all collateral (one transaction)"
+                                style={{ background: '#ef444422', border: '1px solid #ef4444', color: '#ef4444', padding: '4px 10px', borderRadius: 6, cursor: marginPoolBusy ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>
+                                ✕ Close
+                              </button>
+                              <button
+                                onClick={() => onAskAgent('Analyze the risk of my SUI/USDC margin position')}
+                                style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+                                AI
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
