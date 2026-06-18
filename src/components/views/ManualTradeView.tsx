@@ -999,9 +999,14 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       await fetchAndInjectVAA(tx, 'SUI_USDC');
       if (a.debtBase)  db.marginManager.repayBase(a.managerId, undefined as any)(tx);
       if (a.debtQuote) db.marginManager.repayQuote(a.managerId, undefined as any)(tx);
-      // Withdraw everything that's now unlocked, back to the wallet.
-      if (a.totalBase > 0)  { const c = db.marginManager.withdrawBase(a.managerId, a.totalBase)(tx);   tx.transferObjects([c], tx.pure.address(account.address)); }
-      if (a.totalQuote > 0) { const c = db.marginManager.withdrawQuote(a.managerId, a.totalQuote)(tx); tx.transferObjects([c], tx.pure.address(account.address)); }
+      // Withdraw (almost) everything, back to the wallet. The contract aborts (code 8)
+      // if you try to drain a manager that still has any borrow-share to exactly 0,
+      // so we leave a 0.1% dust buffer — verified via dry-run (withdraw 9.99 of 10 OK,
+      // 10 of 10 aborts). The dust stays recoverable once the borrow-share is gone.
+      const baseOut  = a.totalBase  * 0.999;
+      const quoteOut = a.totalQuote * 0.999;
+      if (baseOut  > 0) { const c = db.marginManager.withdrawBase(a.managerId, baseOut)(tx);   tx.transferObjects([c], tx.pure.address(account.address)); }
+      if (quoteOut > 0) { const c = db.marginManager.withdrawQuote(a.managerId, quoteOut)(tx); tx.transferObjects([c], tx.pure.address(account.address)); }
       const signed = await signTx({ transaction: tx });
       const res = await suiClient.executeTransactionBlock({ transactionBlock: signed.bytes, signature: signed.signature, options: { showEffects: true } });
       if (res.effects?.status?.status === 'success') { showToast('Position closed — debt repaid, collateral returned.', 'success'); await refreshMarginPool(); }
@@ -1739,8 +1744,11 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                     // Withdraw ALL of the selected collateral's liquid balance in one click.
                     const liquid = marginColAsset === 'SUI' ? (marginPoolAssets?.base ?? 0) : (marginPoolAssets?.quote ?? 0);
                     if (liquid <= 0) return showToast(`No liquid ${marginColAsset} to withdraw.`, 'info');
-                    setMarginColAmount(liquid.toFixed(6));
-                    handleMarginCollateralAction('withdraw', liquid);
+                    // Leave a 0.1% dust buffer — the contract aborts (code 8) on a
+                    // full drain while any borrow-share remains (verified via dry-run).
+                    const out = liquid * 0.999;
+                    setMarginColAmount(out.toFixed(6));
+                    handleMarginCollateralAction('withdraw', out);
                   }} style={{
                     padding: '8px 14px', borderRadius: 8, border: 'none', background: '#ef4444',
                     color: '#fff', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer', whiteSpace: 'nowrap'
