@@ -1233,9 +1233,13 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
           });
         } catch { /* skip */ }
       }
+      // Hide fully-closed / dust managers (no debt + negligible assets) — like
+      // DeepTrade, which hides emptied accounts. A repaid manager can keep a few
+      // raw borrow-shares + sub-cent dust that can't be withdrawn to exactly 0.
+      const visible = accounts.filter(a => a.hasDebt || a.totalBase > 0.05 || a.totalQuote > 0.05);
       // Show managers with a real open position (debt) first, then the rest.
-      accounts.sort((a, b) => Number(b.hasDebt) - Number(a.hasDebt));
-      setAllMarginAccounts(accounts);
+      visible.sort((a, b) => Number(b.hasDebt) - Number(a.hasDebt));
+      setAllMarginAccounts(visible);
 
       // Best one drives the deposit/withdraw panel (unchanged behaviour).
       const best = (await pickBestSuiUsdcManager(suiClient, suiUsdcIds)) || suiUsdcIds[0];
