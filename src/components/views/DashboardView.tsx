@@ -192,6 +192,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
         ))}
       </div>
 
+      {/* ── Why Suirobo ── */}
+      <h2 style={{ ...heading, fontSize: '1.4rem', marginBottom: 6 }}>Why Suirobo</h2>
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 18, maxWidth: 760 }}>
+        Always-on AI agents burn huge LLM inference costs that quietly eat the profit. Suirobo uses AI where it's
+        worth it — research, audit, backtest — then hands execution to lean robots that run 24/7 at near-zero cost.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18, marginBottom: 44 }}>
+        {[
+          { icon: '⚡', title: 'Cheaper than always-on AI', desc: 'AI agents design & backtest the strategy once; deterministic robots execute it 24/7 — no endless per-trade API bills draining your returns.' },
+          { icon: '🔑', title: 'Self-custody by design', desc: 'Your private key and assets never leave your machine. Suirobo is a tool, not a custodian — no central vault for hackers to target.' },
+          { icon: '📊', title: 'Backtested discipline', desc: 'Every strategy is EA-style and rules-based, validated month-by-month on real historical market data before it ever goes live.' },
+          { icon: '💰', title: 'A creator economy', desc: 'Publish a winning strategy to the on-chain marketplace and earn a creator fee — 0.005 SUI for every position your bot opens, paid automatically.' },
+        ].map(c => (
+          <div key={c.title} style={{ ...card, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: '1.5rem', marginBottom: 10 }}>{c.icon}</div>
+            <h3 style={{ ...heading, fontSize: '1.02rem', marginBottom: 8 }}>{c.title}</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.55 }}>{c.desc}</p>
+          </div>
+        ))}
+      </div>
+
       {/* ── Trust footer ── */}
       <div style={{
         borderTop: '1px solid #1e293b', paddingTop: 22, marginBottom: 8,

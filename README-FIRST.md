@@ -1,8 +1,6 @@
 # Suirobo — Stay Ahead of the AI-Agent Era
 
-### A smarter, cheaper, and more sustainable way to trade on-chain · [`autobots.wal.app`](https://autobots.wal.app)
-
-> Self-custody · Built on Sui — DeepBook V3 & DeepBook Margin, Walrus, Pyth, SuiNS
+### A smarter, cheaper, and more sustainable way to trade on-chain · `autobots.wal.app`
 
 The AI-agent wave is sweeping across decentralized finance and promises to reshape the entire face of the market. In the middle of that frenzy, almost everyone dreams of the same ideal: an intelligent AI agent that analyzes the market and trades for them, 24/7, across decentralized exchanges (DEXs).
 
@@ -10,7 +8,7 @@ The AI-agent wave is sweeping across decentralized finance and promises to resha
 
 Today's "smart" agents run on a constant stream of API calls to large language models (LLMs). If you let an agent continuously ingest real-time data, reason over every market move, and "call the API" non-stop to trade around the clock, the **inference cost becomes astronomical** — large enough to quietly erode, or even completely swallow, every bit of profit the bot earns.
 
-Having seen that wasteful dead end, **Suirobo** was built on a fundamentally different philosophy — smarter, more durable, and more economical:
+Having seen that wasteful dead end, **Suirobo** (`autobots.wal.app`) was built on a fundamentally different philosophy — smarter, more durable, and more economical:
 
 - **AI agents are the strategy brain.** We point intelligent API agents at exactly what they're best at — auditing, deep backtesting, and research — to discover and shape the single most optimized strategy.
 - **Robotics are the 24/7 execution arm.** Once the AI agent has done the hard thinking and locked in a strategy, execution is handed off to pure, deterministic trading robots on the DEX. They run continuously, tirelessly, with **no expensive per-trade API cost** — yet they carry out the full intelligence the AI established up front.
@@ -74,15 +72,4 @@ The system runs efficiently, economically, with absolute security, and opens the
 
 ---
 
-## How it's built (Sui-native)
-
-| Layer | Tech |
-|---|---|
-| Spot & leveraged trading | **DeepBook V3** + **DeepBook Margin** (SUI/USDC) via `pool_proxy` |
-| Prices | **Pyth** oracle feeds |
-| Marketplace / creator fee | on-chain `suirobo_factory` contract (deterministic 0.005 SUI/open to the skill author) |
-| Hosting & storage | **Walrus** — frontend Site, bot-skill source, and agent memory (verifiable) |
-| Naming | **SuiNS** — `autobots.sui` |
-| Clients | Walrus-hosted web app **+** one-click portable desktop app (bundles the local agent) |
-
-**Live app:** [autobots.wal.app](https://autobots.wal.app)
+*Self-custody · Built on Sui — DeepBook V3 & DeepBook Margin, Walrus, Pyth, SuiNS · `autobots.wal.app`*
