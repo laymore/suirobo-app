@@ -78,10 +78,19 @@ server/publish_template_bots.ts
 server/skills_draft/
 server/execute_agent_test.ts
 server/*_test.ts
-# Root-level scratch test scripts (run via `npx tsx` / node) — never committed
+# Root-level scratch scripts (run via `npx tsx` / node) — never committed
 /test-*.ts
 /test-*.cjs
 /test.js
 /final-test.cjs
+/test_*.ts
+/test_*.cjs
+/test_*.js
+/check-*.ts
+/check_*.ts
+/fetch-*.ts
+/fetch_*.ts
+/sweep-*.ts
+/debug-*.ts
 test-e2e-*.cjs
 fetch_docs.js
