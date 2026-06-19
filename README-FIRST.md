@@ -72,4 +72,17 @@ The system runs efficiently, economically, with absolute security, and opens the
 
 ---
 
+## 🚀 What's next — our roadmap
+
+Suirobo is only getting started. Our focus going forward is to make the toolkit dramatically more powerful and more flexible — so any trader can express any idea, rigorously test it, and arm an Auto Bot with it:
+
+- **A deeper backtesting engine.** Longer histories, more assets and timeframes, multi-strategy and walk-forward testing, and richer analytics (drawdown curves, per-trade breakdowns, robustness checks) — so a strategy is proven before a single coin is at risk.
+- **More indicators.** A continuously growing library beyond Supertrend / Bollinger / EMA / RSI / MACD — VWAP, Ichimoku, ATR bands, volatility and order-flow signals, and custom composites.
+- **More options & configurability.** Finer control over entries, exits, risk sizing, trading sessions, multi-timeframe gates, and conditional rules — all no-code.
+- **A more flexible Auto-Bot toolkit.** New building blocks and capabilities for the bots themselves: multi-pair / portfolio bots, smarter risk management, advanced TP/SL and trailing logic, and an ever-expanding set of ready-made, battle-tested templates.
+
+Our north star: turn strategy research into a fast, rigorous, no-code workflow — while keeping every Auto Bot self-custodial, verifiable, and cheap to run 24/7.
+
+---
+
 *Self-custody · Built on Sui — DeepBook V3 & DeepBook Margin, Walrus, Pyth, SuiNS · `autobots.wal.app`*
