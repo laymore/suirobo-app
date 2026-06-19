@@ -80,6 +80,7 @@ Suirobo is only getting started. Our focus going forward is to make the toolkit 
 - **More indicators.** A continuously growing library beyond Supertrend / Bollinger / EMA / RSI / MACD — VWAP, Ichimoku, ATR bands, volatility and order-flow signals, and custom composites.
 - **More options & configurability.** Finer control over entries, exits, risk sizing, trading sessions, multi-timeframe gates, and conditional rules — all no-code.
 - **A more flexible Auto-Bot toolkit.** New building blocks and capabilities for the bots themselves: multi-pair / portfolio bots, smarter risk management, advanced TP/SL and trailing logic, and an ever-expanding set of ready-made, battle-tested templates.
+- **Full desktop & mobile apps.** Build out and complete the entire toolkit into polished native desktop and mobile apps — research, backtest, publish, and run Auto Bots from anywhere, with the same self-custody guarantees.
 
 Our north star: turn strategy research into a fast, rigorous, no-code workflow — while keeping every Auto Bot self-custodial, verifiable, and cheap to run 24/7.
 
