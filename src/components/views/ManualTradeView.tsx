@@ -1016,6 +1016,54 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
     } finally { setMarginPoolBusy(false); }
   };
 
+  // ── Swap-repay: SELL the collateral on DeepBook to repay the debt — no wallet
+  // funds needed (DeepTrade's "Enable swaps for repayment"). VERIFIED via dry-run:
+  // pool_proxy.placeMarketOrder (regular, payWithDeep:false) + withdrawSettledAmounts
+  // + repayBase/repayQuote(undefined) succeeds. The withdraw of the freed collateral
+  // is done separately via "Withdraw all" (a same-tx withdraw trips a proof check).
+  const handleMarginSwapClose = async (a: {
+    managerId: string; realDebtBase: number; realDebtQuote: number;
+  }) => {
+    if (!account) return showToast('Connect your wallet first!', 'error');
+    const isLong = a.realDebtQuote > 0;            // long borrowed USDC (quote) → sell SUI
+    const isShort = a.realDebtBase > 0;            // short borrowed SUI (base) → buy SUI
+    if (!isLong && !isShort) return showToast('No debt to repay.', 'info');
+    const price = suiPrice || 0;
+    if (price <= 0) return showToast('SUI price unavailable — try ↻ Refresh.', 'error');
+    setMarginPoolBusy(true);
+    showToast('Selling collateral on DeepBook to repay the debt…', 'info');
+    try {
+      const db = new DeepBookClient({
+        client: suiClient as any, network: 'mainnet', address: account.address,
+        marginManagers: { [a.managerId]: { marginManagerKey: a.managerId, address: a.managerId, poolKey: 'SUI_USDC' } } as any,
+      });
+      const tx = new Transaction();
+      await fetchAndInjectVAA(tx, 'SUI_USDC');
+      const cid = Math.floor(Date.now() / 1000);
+      // Trade enough SUI to cover the debt (+ buffer for fees/slippage), min 1 SUI lot.
+      const lot = (q: number) => Math.max(1, Math.ceil(q * 10) / 10);
+      if (isLong) {
+        const qty = lot((a.realDebtQuote / price) * 1.5);                 // sell SUI → USDC
+        db.poolProxy.placeMarketOrder({ poolKey: 'SUI_USDC', marginManagerKey: a.managerId, clientOrderId: cid, quantity: qty, isBid: false, payWithDeep: false } as any)(tx);
+        db.poolProxy.withdrawSettledAmounts(a.managerId)(tx);
+        db.marginManager.repayQuote(a.managerId, undefined as any)(tx);
+      } else {
+        const qty = lot(a.realDebtBase * 1.05);                          // buy SUI ← USDC
+        db.poolProxy.placeMarketOrder({ poolKey: 'SUI_USDC', marginManagerKey: a.managerId, clientOrderId: cid, quantity: qty, isBid: true, payWithDeep: false } as any)(tx);
+        db.poolProxy.withdrawSettledAmounts(a.managerId)(tx);
+        db.marginManager.repayBase(a.managerId, undefined as any)(tx);
+      }
+      const signed = await signTx({ transaction: tx });
+      const res = await suiClient.executeTransactionBlock({ transactionBlock: signed.bytes, signature: signed.signature, options: { showEffects: true } });
+      if (res.effects?.status?.status === 'success') {
+        showToast('Debt repaid by selling collateral. Use "Withdraw all" to take the rest.', 'success');
+        await refreshMarginPool();
+      } else throw new Error(res.effects?.status?.error || 'tx failed');
+    } catch (e: any) {
+      showToast(`Swap-repay failed: ${(e.message || e).toString().slice(0, 160)}`, 'error');
+    } finally { setMarginPoolBusy(false); }
+  };
+
   const handleRedeemPredict = async (pos: PredictPos, idx: number) => {
     if (!account) return showToast('Connect your wallet first!', 'error');
     setIsExecuting(true);
@@ -2588,6 +2636,15 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                                   title="Repay the full debt from your wallet (one transaction)"
                                   style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: '#fbbf24', padding: '4px 10px', borderRadius: 6, cursor: marginPoolBusy ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>
                                   💳 Repay
+                                </button>
+                              )}
+                              {a.hasDebt && (
+                                <button
+                                  onClick={() => { if (window.confirm('Sell collateral on DeepBook to repay the debt?\n\nNo wallet funds needed — it market-sells just enough of your collateral to clear the debt, then you can Withdraw all the rest.')) handleMarginSwapClose(a); }}
+                                  disabled={marginPoolBusy}
+                                  title="Sell collateral to repay the debt — no wallet funds needed (DeepTrade-style)"
+                                  style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.6)', color: '#c084fc', padding: '4px 10px', borderRadius: 6, cursor: marginPoolBusy ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>
+                                  💱 Sell+Repay
                                 </button>
                               )}
                               <button
