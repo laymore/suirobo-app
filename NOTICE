@@ -1,0 +1,23 @@
+Suirobo
+© 2026 Autobots Team. All rights reserved.
+
+Author:   Autobots Team
+Project:  Suirobo — self-custody AI trading bots on Sui
+Live app: https://autobots.wal.app
+Source:   https://github.com/laymore/suirobo-app
+
+This source code and the "Suirobo" / "Autobots" branding are the original work
+of Autobots Team. You may not copy, redistribute, rebrand, or deploy this code
+or its builds as your own.
+
+AUTHORSHIP WATERMARK
+Every production build carries an embedded, searchable fingerprint identifying
+Autobots Team as the author (see src/signature.ts):
+
+    SUIROBO::AUTOBOTS-TEAM::autobots.wal.app::fp-7f3a9c2e-9b0536ec-2026
+
+If this fingerprint, the on-load console banner ("Built by Autobots Team"), or
+the page meta tags (author = "Autobots Team") appear in any deployment not
+operated by Autobots Team, it is direct evidence the source was copied from us.
+
+For licensing or permission inquiries, contact the Autobots Team.
