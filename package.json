@@ -17,6 +17,7 @@
     "agent:publish": "node publish_agent.cjs",
     "agent:dist": "npm run agent:build && npm run agent:publish",
     "deploy": "npx tsx deploy_walrus.ts",
+    "deploy:site": "sui client switch --address 0xafbc48fd349fb44ce9c6f2b33423e6ae7c826d53a25920a0d4c3c475e40889c5 && npm run build && site-builder update ./dist 0xf070fa29afac7f54de6f849d6e4391b181ba511205e1e4474cf58bfa39537a81 --epochs 10",
     "app": "electron electron/main.cjs",
     "app:build": "npm run build && npm run agent:build && electron electron/main.cjs",
     "dist:win": "npm run build && npm run agent:build && electron-builder --win portable"
