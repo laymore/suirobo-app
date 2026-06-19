@@ -45,9 +45,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
       cta: 'Download agent', action: () => setShowDownload(true),
     },
     {
-      n: '2', title: 'Pick a bot skill',
-      desc: 'Backtested strategies from the marketplace, source verified on Walrus. Most are free.',
-      cta: 'Browse skills', action: () => onNavigate?.('factory'),
+      n: '2', title: 'Pick an Auto Bot',
+      desc: 'Backtested Auto Bots from the marketplace, source verified on Walrus. Most are free.',
+      cta: 'Browse Auto Bots', action: () => onNavigate?.('factory'),
     },
     {
       n: '3', title: 'Fund and start',
@@ -57,9 +57,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
   ];
 
   const topSkills = [
-    { name: 'BB MeanRev M15', desc: 'Bollinger mean-reversion, 15-minute candles. Default pick from our backtest sweep.', tag: 'Recommended' },
-    { name: 'SUI Alpha M30', desc: 'RSI + MACD hybrid on 30-minute candles, trend-filtered entries.', tag: 'Hybrid' },
-    { name: 'SUI EMA H1', desc: 'EMA crossover on hourly candles. Fewer trades, wider stops.', tag: 'Trend' },
+    { name: 'SUI MTF Supertrend M5', desc: 'H4 Supertrend gates direction; M5 Supertrend-flip entries with a trailing runner (no TP cap). ~+5.4%/mo avg, Mar–Sep 2025.', tag: 'MTF' },
+    { name: 'SUI Supertrend M5', desc: 'Classic Supertrend-flip EA, short-side, US session, TP3 / SL1.5. Profitable every month Jan–May 2026 on real M5 data.', tag: 'Recommended' },
+    { name: 'BTC Breakout M15', desc: 'Donchian range-breakout EA, Asia session, 2% risk-per-trade. +45.9% over full-year 2025 on real BTC M15 data.', tag: 'Breakout' },
   ];
 
   const up = (sui?.changePct ?? 0) >= 0;
@@ -75,7 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
           </h1>
           <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: '58ch', marginBottom: 22 }}>
             Suirobo runs automated DeepBook trading bots from an agent on <em style={{ fontStyle: 'normal', color: '#cbd5e1' }}>your</em> computer.
-            Your private key never leaves your machine, and every skill's source is verifiable on Walrus.
+            Your private key never leaves your machine, and every Auto Bot's source is verifiable on Walrus.
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {agentOnline ? (
@@ -98,7 +98,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
               background: 'transparent', border: '1px solid var(--sui-blue)', color: 'var(--sui-blue)',
               fontWeight: 600, fontSize: '0.95rem',
             }}>
-              Explore skills
+              Explore Auto Bots
             </button>
           </div>
         </div>
@@ -164,11 +164,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
 
       {/* ── Top skills ── */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 18 }}>
-        <h2 style={{ ...heading, fontSize: '1.4rem' }}>Bot skills to start with</h2>
+        <h2 style={{ ...heading, fontSize: '1.4rem' }}>Auto Bots to start with</h2>
         <button onClick={() => onNavigate?.('factory')} style={{
           background: 'none', border: 'none', color: 'var(--sui-blue)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500,
         }}>
-          View all in Skill Factory →
+          View all in Autobots Factory →
         </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginBottom: 44 }}>
@@ -219,7 +219,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
         display: 'flex', gap: 26, flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-secondary)',
       }}>
         <span>🔑 Self-custody — keys stay on your machine</span>
-        <span>🌊 Agent + skills source hosted on Walrus</span>
+        <span>🌊 Agent + Auto Bot source hosted on Walrus</span>
         <span>🧾 Build a bot people trade — earn 0.005 SUI per opened position</span>
       </div>
 
