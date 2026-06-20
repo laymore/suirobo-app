@@ -817,7 +817,10 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
         showToast('No PredictManager — creating one. Sign on TESTNET…', 'info');
         const ctx = new Transaction();
         ctx.moveCall({ target: `${PREDICT_PACKAGE}::predict::create_manager`, arguments: [] });
-        const signedC = await signTx({ transaction: ctx });
+        // chain: 'sui:testnet' → dApp-kit resolves/signs against TESTNET (the
+        // provider has it registered), not the default mainnet — otherwise it
+        // tries to find the testnet package on mainnet ("Package does not exist").
+        const signedC = await signTx({ transaction: ctx, chain: 'sui:testnet' });
         const rc = await tnet.executeTransactionBlock({ transactionBlock: signedC.bytes, signature: signedC.signature, options: { showEffects: true } });
         if (rc.effects?.status?.status === 'success') showToast('PredictManager created — click Submit again to place your prediction.', 'success');
         else throw new Error(rc.effects?.status?.error || 'create_manager failed');
@@ -848,7 +851,7 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       });
 
       showToast('Sign on TESTNET in your wallet…', 'info');
-      const signed = await signTx({ transaction: tx });
+      const signed = await signTx({ transaction: tx, chain: 'sui:testnet' });
       showToast('Submitting to Sui Testnet…', 'info');
       const result = await tnet.executeTransactionBlock({
         transactionBlock: signed.bytes, signature: signed.signature, options: { showEffects: true },
@@ -1130,7 +1133,7 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       });
 
       showToast(`Sign the Redeem on TESTNET…`, 'info');
-      const signed = await signTx({ transaction: tx });
+      const signed = await signTx({ transaction: tx, chain: 'sui:testnet' });
 
       showToast(`Submitting to Sui Testnet…`, 'info');
       const result = await tnet.executeTransactionBlock({

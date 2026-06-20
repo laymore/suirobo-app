@@ -13,7 +13,7 @@ import { predictTools } from '../tools/predict.js';
 
 // Testnet Predict Contract Constants
 const TESTNET_RPC        = 'https://fullnode.testnet.sui.io';
-const PREDICT_PACKAGE    = '0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab25eda6ec4b3b2db6b53b08';
+const PREDICT_PACKAGE    = '0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138';
 const PREDICT_MARKET     = '0x2f4d7dfe4c18ef6a73d4f7a2b1b0e32a847e067b0f5bbbcdb7a8aedb8a8c547'; // BTC Binary Market
 const DUSDC_TYPE         = '0xe95040085976bfd54a1a07225cd46c8a2b4e8e2b6732f140a0fc49850ba73e1a::dusdc::DUSDC';
 
