@@ -11,6 +11,7 @@ import { BacktestSimulator } from './components/BacktestSimulator';
 import { LiveTradeDashboard } from './components/LiveTradeDashboard';
 import { WebBotPanel } from './components/WebBotPanel';
 import { SetupWizard } from './components/SetupWizard';
+import DevMarginTest from './components/DevMarginTest';
 import type { BotSkillConfig } from './types/botSkill';
 import { useUserConfig } from './hooks/useUserConfig';
 import { useI18n } from './i18n';
@@ -131,12 +132,15 @@ export default function App() {
     error:        '#ef4444',
   }[status];
 
+  const showMarginTest = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('devmargintest');
+
   return (
     <div style={{
       height: '100vh', background: '#060e1e',
       display: 'flex', flexDirection: 'column',
       fontFamily: "'Inter', -apple-system, sans-serif",
     }}>
+      {showMarginTest && <DevMarginTest />}
       {/* ── Header ── */}
       <header style={{
         display: 'flex', alignItems: 'center', gap: 12,

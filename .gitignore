@@ -94,3 +94,5 @@ server/*_test.ts
 /debug-*.ts
 test-e2e-*.cjs
 fetch_docs.js
+server/inspect_*.ts
+server/check-*.ts

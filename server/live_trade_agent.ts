@@ -239,7 +239,7 @@ function recordClose(exit: number, pnlPct: number, pnlVal: number, reason: strin
 
 let logId = 0;
 function addLog(type: TradeLog['type'], msg: string, price?: number, pnl?: number, txDigest?: string) {
-  const entry: TradeLog = { id: ++logId, time: new Date().toLocaleTimeString('vi-VN'), type, msg, price, pnl, txDigest };
+  const entry: TradeLog = { id: ++logId, time: new Date().toLocaleTimeString('en-GB'), type, msg, price, pnl, txDigest };
   state.logs.unshift(entry);
   if (state.logs.length > 300) state.logs.length = 300;
   console.log(`[LiveBot][${type.toUpperCase()}] ${msg}${txDigest ? ' | Tx: ' + txDigest.slice(0, 12) + '...' : ''}`);
@@ -435,26 +435,59 @@ async function injectPythUpdate(tx: Transaction): Promise<void> {
   await pythClient.updatePriceFeeds(tx, updates, feeds);
 }
 
+// Open a REAL directional leveraged position via DeepBook Margin (same proven
+// path as ManualTradeView's margin order): the borrow alone is net-neutral, so
+// we borrow AND swap in one atomic tx to create actual exposure.
+//   LONG  = borrow USDC → market-BUY  `sizeBase` SUI  (profit when SUI ↑)
+//   SHORT = borrow SUI  → market-SELL `sizeBase` SUI  (profit when SUI ↓)
+// The borrow is exactly the amount spent on the swap, so the tx is self-balancing;
+// leverage is set by how much collateral already sits in the manager (an
+// over-leveraged size simply aborts the health check — no funds at risk).
 async function directOpen(
   keypair: Ed25519Keypair,
   type: 'LONG' | 'SHORT',
-  borrowAmt: number,
+  sizeBase: number,
+  price: number,
   skillAuthor?: string,
-): Promise<string> {
+): Promise<{ digest: string; qty: number }> {
   const address = keypair.toSuiAddress();
   const { dbClient, managerKey } = await getDbClientWithManager(address);
+
+  // ── Health cap ──────────────────────────────────────────────────────────
+  // This borrow-the-notional pattern is safe only up to ~1x: the order's
+  // withdraw_with_proof aborts (code 3) when collateral can't back the borrow.
+  // Read the real collateral and keep effective leverage ≤ ~0.9x, snapping to a
+  // valid 1-SUI lot. Too little collateral → skip cleanly (never a mid-tx abort).
+  let collateralSui = 0;
+  try { collateralSui = Number((await dbClient.getMarginManagerAssets(managerKey)).baseAsset) || 0; } catch { /* leave 0 */ }
+  const MIN_COLLATERAL = 1.2;
+  if (collateralSui < MIN_COLLATERAL) {
+    throw new Error(`Margin collateral too low (${collateralSui.toFixed(2)} SUI). Deposit ≥ ${MIN_COLLATERAL} SUI into the margin account so the bot can open the 1-SUI minimum position safely.`);
+  }
+  const maxQty = Math.floor(collateralSui * 0.9 * 10) / 10;     // ≤ ~0.9x leverage
+  const qty = Math.min(lotSafe(sizeBase), Math.max(1, maxQty)); // ≥ 1-SUI lot
 
   const tx = new Transaction();
   tx.setSender(address);
 
-  // Pyth price update MUST precede borrow (health check reads the feeds).
+  // Pyth price update MUST precede borrow + order (health checks read the feeds).
   await injectPythUpdate(tx);
 
-  // LONG = borrowBase (SUI), SHORT = borrowQuote (USDC)
+  const cid = Date.now().toString();
   if (type === 'LONG') {
-    dbClient.marginManager.borrowBase(managerKey, borrowAmt)(tx);
+    // Borrow the USDC notional, then market-buy the SUI → long exposure.
+    dbClient.marginManager.borrowQuote(managerKey, qty * price)(tx);
+    dbClient.poolProxy.placeMarketOrder({
+      poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid,
+      quantity: qty, isBid: true, payWithDeep: false,
+    })(tx);
   } else {
-    dbClient.marginManager.borrowQuote(managerKey, borrowAmt)(tx);
+    // Borrow the SUI, then market-sell it for USDC → short exposure.
+    dbClient.marginManager.borrowBase(managerKey, qty)(tx);
+    dbClient.poolProxy.placeMarketOrder({
+      poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid,
+      quantity: qty, isBid: false, payWithDeep: false,
+    })(tx);
   }
 
   // 0.01 SUI bot-skill open fee → 0.005 marketplace + 0.005 to the skill author.
@@ -462,28 +495,57 @@ async function directOpen(
   // Skipped if no author is set (e.g. self-built unpublished skill).
   if (skillAuthor) injectBotOpenFee(tx, [skillAuthor]);
 
-  return signAndBroadcast(tx, keypair);
+  const digest = await signAndBroadcast(tx, keypair);
+  return { digest, qty };
 }
 
+// Close a real directional position by swapping back to flat and repaying the
+// FULL debt — sized from the manager's ACTUAL debt (not the position size) with
+// an over-cover buffer, so the repay leaves ZERO residual. This matters: DeepBook
+// margin forbids holding base AND quote debt at once, so a dust quote-debt left
+// after a LONG close would abort the next SHORT's borrow_base (code 4). Mirrors
+// ManualTradeView.handleMarginSwapClose (the proven on-chain path).
+//   close LONG  = sell (quoteDebt/price)*1.5 SUI → withdraw → repay USDC
+//   close SHORT = buy   baseDebt*1.05      SUI → withdraw → repay SUI
 async function directClose(
   keypair: Ed25519Keypair,
   type: 'LONG' | 'SHORT',
-  repayAmt: number,
+  price: number,
 ): Promise<string> {
   const address = keypair.toSuiAddress();
   const { dbClient, managerKey } = await getDbClientWithManager(address);
 
+  // Read the real outstanding debt so the closing swap over-covers it exactly.
+  let baseDebt = 0, quoteDebt = 0;
+  try {
+    const d: any = await dbClient.getMarginManagerDebts(managerKey);
+    baseDebt  = parseFloat(d?.baseDebt  ?? '0') || 0;
+    quoteDebt = parseFloat(d?.quoteDebt ?? '0') || 0;
+  } catch { /* fall back to a 1-lot close below */ }
+
   const tx = new Transaction();
   tx.setSender(address);
 
-  // Pyth update first — repay-side health accounting also reads the feeds.
+  // Pyth update first — order + repay-side health accounting read the feeds.
   await injectPythUpdate(tx);
 
-  // LONG = repayBase (SUI back), SHORT = repayQuote (USDC back)
+  const cid = Date.now().toString();
   if (type === 'LONG') {
-    dbClient.marginManager.repayBase(managerKey, repayAmt)(tx);
+    const qty = lotSafe((quoteDebt / (price || 1)) * 1.5);   // sell enough SUI to clear USDC debt
+    dbClient.poolProxy.placeMarketOrder({
+      poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid,
+      quantity: qty, isBid: false, payWithDeep: false,
+    })(tx);
+    dbClient.poolProxy.withdrawSettledAmounts(managerKey)(tx);
+    dbClient.marginManager.repayQuote(managerKey, undefined as any)(tx);
   } else {
-    dbClient.marginManager.repayQuote(managerKey, repayAmt)(tx);
+    const qty = lotSafe(baseDebt * 1.05);                    // buy enough SUI to clear SUI debt
+    dbClient.poolProxy.placeMarketOrder({
+      poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid,
+      quantity: qty, isBid: true, payWithDeep: false,
+    })(tx);
+    dbClient.poolProxy.withdrawSettledAmounts(managerKey)(tx);
+    dbClient.marginManager.repayBase(managerKey, undefined as any)(tx);
   }
 
   // Close is FREE — no bot-skill fee charged on exits.
@@ -594,11 +656,41 @@ function calcSize(cfg: LiveBotConfig, price: number) {
   return { marginSUI, borrowSUI, borrowUSDC };
 }
 
-function calcPnl(pos: ActivePosition, currentPrice: number) {
-  const diff = pos.type === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
-  return { pct: Math.round((diff / pos.entryPrice) * 100 * cfg_leverage_cache * 100) / 100 };
+// Format a price with decimals suited to its magnitude. Sub-$1 assets (SUI ≈
+// $0.8) must NOT be rounded to whole dollars, or TP/SL collapse onto the wrong
+// side of the entry and the position closes the instant it opens.
+function fmtPx(p: number): string {
+  if (!Number.isFinite(p)) return '0';
+  const dp = p >= 100 ? 0 : p >= 1 ? 2 : 4;
+  return p.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
+
+// DeepBook SUI_USDC has a 1-SUI minimum order and a 0.1-SUI lot step. A market
+// order below that aborts in pool_proxy::calculate_effective_price (code 5), so
+// every order quantity is snapped up to a valid lot.
+function lotSafe(q: number): number {
+  return Math.max(1, Math.round(q * 10) / 10);
+}
+
 let cfg_leverage_cache = 1; // updated on each position open
+
+// Net PnL estimate for the open position at a given exit price. A market order
+// pays spread + taker, and opening costs 0.01 SUI — so this reflects a real
+// market round-trip rather than an ideal limit fill. Returns the value in the
+// position's borrow-unit plus the leveraged % on margin.
+function estPnl(pos: ActivePosition, exitPrice: number): { val: number; pct: number } {
+  const cfg   = state.config as LiveBotConfig | null;
+  const diff  = pos.type === 'LONG' ? exitPrice - pos.entryPrice : pos.entryPrice - exitPrice;
+  const gross = pos.borrowAmount * (diff / pos.entryPrice);
+  let cost = pos.borrowAmount * 0.0015;                               // ~0.15% spread+taker, round trip
+  if (cfg && !isXbtcPair(cfg.pair) && cfg.skillAuthor) cost += 0.01;  // 0.01 SUI open fee (SUI-denominated path)
+  const net = gross - cost;
+  const marginUnit = pos.borrowAmount / (cfg_leverage_cache || 1);
+  return {
+    val: Math.round(net * 100) / 100,
+    pct: marginUnit > 0 ? Math.round((net / marginUnit) * 1000) / 10 : 0,
+  };
+}
 
 // ─── Open Position ────────────────────────────────────────────────────────────
 
@@ -611,7 +703,7 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
   const tpPrice = type === 'LONG' ? price * (1 + cfg.takeProfitPct / 100) : price * (1 - cfg.takeProfitPct / 100);
   const slPrice = type === 'LONG' ? price * (1 - cfg.stopLossPct   / 100) : price * (1 + cfg.stopLossPct   / 100);
 
-  addLog('signal', `📡 ${type} signal @ $${price.toLocaleString()} | TP:$${Math.round(tpPrice).toLocaleString()} SL:$${Math.round(slPrice).toLocaleString()}`, price);
+  addLog('signal', `📡 ${type} signal @ $${fmtPx(price)} | TP:$${fmtPx(tpPrice)} SL:$${fmtPx(slPrice)}`, price);
   broadcast({ type: 'SIGNAL_DETECTED', signalType: type, price, tpPrice, slPrice });
 
   const { base, quote } = pairAssets(cfg.pair);
@@ -659,14 +751,21 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
         digest = await directXbtcOrder(keypair, side, price, qtyXbtc, cfg.balanceManagerId, cfg.feeManagerId, true, cfg.skillAuthor);
         posBorrowAsset = 'XBTC'; posBorrowAmt = qtyXbtc;
       } else {
-        // SUI/USDC → DeepBook margin borrow, server-signed
-        addLog('info', `⚙️ [DIRECT] Open ${type} — borrow ${borrowAmt} ${borrowAsset}...`);
-        digest = await directOpen(keypair, type, borrowAmt, cfg.skillAuthor);
+        // SUI/USDC → DeepBook margin: borrow + swap into a real position, server-signed.
+        // directOpen caps the size to the manager's collateral and returns the exact
+        // SUI quantity it traded — store THAT so directClose sells back the same and
+        // PnL is measured on the real exposure.
+        addLog('info', `⚙️ [DIRECT] Open ${type} ~${lotSafe(borrowSUI)} SUI — ${type === 'LONG' ? 'borrow USDC → buy SUI' : 'borrow SUI → sell SUI'}...`);
+        const opened = await directOpen(keypair, type, borrowSUI, price, cfg.skillAuthor);
+        digest = opened.digest;
+        posBorrowAsset = base;
+        posBorrowAmt   = opened.qty;
+        if (opened.qty < lotSafe(borrowSUI)) addLog('info', `ℹ️ Size capped to ${opened.qty} SUI by available collateral (≤0.9x).`);
       }
 
       state.position = {
         type, entryPrice: price, entryTime: new Date().toISOString(),
-        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        tpPrice, slPrice,
         trailPeak: price, borrowAsset: posBorrowAsset, borrowAmount: posBorrowAmt,
         unrealizedPnl: 0, unrealizedPct: 0,
       };
@@ -699,7 +798,7 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
 
       state.position = {
         type, entryPrice: price, entryTime: new Date().toISOString(),
-        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        tpPrice, slPrice,
         trailPeak: price, borrowAsset: 'XBTC', borrowAmount: qtyXbtc,
         unrealizedPnl: 0, unrealizedPct: 0,
       };
@@ -717,7 +816,7 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
 
       state.position = {
         type, entryPrice: price, entryTime: new Date().toISOString(),
-        tpPrice: Math.round(tpPrice), slPrice: Math.round(slPrice),
+        tpPrice, slPrice,
         trailPeak: price, borrowAsset, borrowAmount: borrowAmt,
         unrealizedPnl: 0, unrealizedPct: 0,
       };
@@ -741,11 +840,11 @@ async function closePosition(reason: ExitReason | 'Manual', exitPrice: number) {
   const pos = state.position;
   const cfg = state.config as LiveBotConfig;
 
-  const diff    = pos.type === 'LONG' ? exitPrice - pos.entryPrice : pos.entryPrice - exitPrice;
-  const pnlPct  = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
-  const pnlApprox = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+  // Net of spread + taker + the 0.01 SUI open fee — a real market round-trip,
+  // not an ideal limit fill.
+  const { val: pnlApprox, pct: pnlPct } = estPnl(pos, exitPrice);
 
-  addLog('signal', `🔔 ${reason} @ $${exitPrice.toLocaleString()} | PnL ≈ ${pnlApprox >= 0 ? '+' : ''}${pnlApprox} | ${pnlPct}%`, exitPrice, pnlApprox);
+  addLog('signal', `🔔 ${reason} @ $${fmtPx(exitPrice)} | Est. PnL ${pnlApprox >= 0 ? '+' : ''}${pnlApprox} (net of fees) | ${pnlPct}%`, exitPrice, pnlApprox);
 
   try {
     if (state.mode === 'direct') {
@@ -766,14 +865,14 @@ async function closePosition(reason: ExitReason | 'Manual', exitPrice: number) {
         // Close = free (isOpening: false)
         digest = await directXbtcOrder(keypair, side, exitPrice, pos.borrowAmount, cfg.balanceManagerId, cfg.feeManagerId, false);
       } else {
-        // SUI/USDC → repay margin borrow, server-signed
-        addLog('info', `⚙️ [DIRECT] Closing ${pos.type} — repaying ${pos.borrowAmount} ${pos.borrowAsset}…`);
-        digest = await directClose(keypair, pos.type, pos.borrowAmount);
+        // SUI/USDC → swap back to flat + repay borrow IN FULL (debt-sized), server-signed
+        addLog('info', `⚙️ [DIRECT] Closing ${pos.type} — ${pos.type === 'LONG' ? 'sell SUI → repay USDC' : 'buy SUI → repay SUI'} (full debt clear)…`);
+        digest = await directClose(keypair, pos.type, exitPrice);
       }
 
+      // tradeCount was already +1 at open — a round-trip is ONE trade, not two.
       state.totalPnl   = Math.round((state.totalPnl + pnlApprox) * 100) / 100;
-      state.tradeCount++;
-      addLog('trade', `✅ [DIRECT] Closed ${pos.type} | ${reason} | PnL: ${pnlApprox >= 0 ? '+' : ''}${pnlApprox}`, exitPrice, pnlApprox, digest);
+      addLog('trade', `✅ [DIRECT] Closed ${pos.type} | ${reason} | Est. PnL ${pnlApprox >= 0 ? '+' : ''}${pnlApprox}`, exitPrice, pnlApprox, digest);
       recordClose(exitPrice, pnlPct, pnlApprox, reason, digest);
       broadcast({ type: 'TRADE_CLOSED', reason, exitPrice, pnlApprox, pnlPct, txDigest: digest });
 
@@ -917,9 +1016,9 @@ async function tradingTick() {
     // ── Manage the open position (shared EA rules) ──
     if (state.position) {
       const pos  = state.position;
-      const diff = pos.type === 'LONG' ? price - pos.entryPrice : pos.entryPrice - price;
-      pos.unrealizedPct = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
-      pos.unrealizedPnl = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+      const u = estPnl(pos, price);
+      pos.unrealizedPct = u.pct;
+      pos.unrealizedPnl = u.val;
 
       const exit = liveManage(cfg, price, { buy, sell });
       if (exit) { await closePosition(exit.reason, exit.price); return; }
@@ -966,9 +1065,9 @@ async function managementTick() {
 
     const pos  = state.position;
     state.currentPrice = price;
-    const diff = pos.type === 'LONG' ? price - pos.entryPrice : pos.entryPrice - price;
-    pos.unrealizedPct = Math.round((diff / pos.entryPrice) * cfg_leverage_cache * 100 * 10) / 10;
-    pos.unrealizedPnl = Math.round(pos.borrowAmount * (diff / pos.entryPrice) * 100) / 100;
+    const u = estPnl(pos, price);
+    pos.unrealizedPct = u.pct;
+    pos.unrealizedPnl = u.val;
 
     const exit = liveManage(cfg, price, { buy: false, sell: false });
     if (exit) { await closePosition(exit.reason, exit.price); return; }
