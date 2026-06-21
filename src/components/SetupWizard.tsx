@@ -589,10 +589,15 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
               </button>
             </div>
 
-            {/* Skip — Auto Bot mode needs no AI key */}
+            {/* Skip — Auto Bot mode needs no AI key (highlighted: it's a first-class path) */}
             <button onClick={() => setStep(isDesktop ? 4 : 3)}
-              style={{ marginTop: -6, padding: '8px', borderRadius: 8, border: '1px dashed #1e293b', background: 'transparent', color: '#475569', fontSize: '0.72rem', cursor: 'pointer' }}>
-              Skip — I'll use ⚡ Auto Bot (no AI key needed) →
+              style={{
+                marginTop: -2, padding: '11px', borderRadius: 8,
+                border: '1px solid #22c55e', background: 'rgba(34,197,94,0.14)',
+                color: '#4ade80', fontSize: '0.82rem', fontWeight: 800, cursor: 'pointer',
+                boxShadow: '0 0 0 1px rgba(34,197,94,0.15)',
+              }}>
+              Skip — I'll use ⚡ Auto Bot · <span style={{ color: '#86efac' }}>no AI key needed</span> →
             </button>
           </div>
         )}

@@ -241,6 +241,9 @@ export const WebBotPanel: React.FC = () => {
     supertrendMult: s.supertrendMult, supertrendPeriod: s.supertrendPeriod, breakoutPeriod: s.breakoutPeriod,
     htfMinutes: s.htfMinutes, htfSupertrendPeriod: s.htfSupertrendPeriod, htfSupertrendMult: s.htfSupertrendMult,
     filters: s.filters,
+    emaFast: s.emaFast, emaSlow: s.emaSlow, maFast: s.maFast, maSlow: s.maSlow,
+    rsiPeriod: s.rsiPeriod, rsiOversold: s.rsiOversold, rsiOverbought: s.rsiOverbought,
+    bbPeriod: s.bbPeriod, bbStdDev: s.bbStdDev,
   }), []);
 
   // ── OPEN a position (build tx → wallet sign) ──

@@ -19,6 +19,12 @@ export interface BotSkillConfig {
   signal: IndicatorType;
   // EA-style extra AND-filters layered on top of the entry signal (optional).
   filters?: FilterBlock[];
+  // Tunable entry-indicator inputs (MT5-style). Optional — defaults reproduce
+  // the classic values. EMA Cross uses ema*, MA Cross uses ma*, etc.
+  emaFast?: number; emaSlow?: number;          // EMA Cross (9 / 21)
+  maFast?: number;  maSlow?: number;           // MA (SMA) Cross (20 / 50)
+  rsiPeriod?: number; rsiOversold?: number; rsiOverbought?: number; // RSI (14, 30/70)
+  bbPeriod?: number; bbStdDev?: number;        // Bollinger (20, 2σ)
   // Supertrend EA inputs (used by 'supertrend' / 'supertrend_flip' signals)
   supertrendPeriod?: number;  // ATR period, default 10
   supertrendMult?: number;    // ATR multiplier, default 3
@@ -87,6 +93,7 @@ export interface BotSkillConfig {
 // Nhãn hiển thị
 export const SIGNAL_LABELS: Record<IndicatorType, string> = {
   ema_cross: 'EMA Cross (9/21)',
+  ma_cross:  'MA Cross (SMA 20/50)',
   rsi:       'RSI Momentum (30/70)',
   macd:      'MACD Histogram',
   bb:        'Bollinger Bands',
@@ -326,6 +333,47 @@ export const PRESET_SKILLS: BotSkillConfig[] = [
   },
 ];
 
+// ── Starter Templates ─────────────────────────────────────────────────────────
+// Clean single-indicator starting points — NOT profit-claimed. Every parameter
+// is editable in Backtest; load one, tweak the indicator inputs + filters, test
+// on real data, then "Save as Bot" to make it your own. Mirrors the per-indicator
+// EA templates that ship with MT5.
+const TPL_BASE = {
+  version: '1.0.0', createdAt: '2026-06-21',
+  takeProfitPct: 3, stopLossPct: 1.5, trailingStopPct: 0,
+  enableTrailing: false, enableDefense: true,
+  leverage: 2, orderPct: 50, commission: 0.05, slippagePct: 0.05,
+  direction: 'both' as const,
+  authorAddress: DEV_WALLET_ADDRESS,
+  preferredTimeframe: 'M15', preferredAsset: 'sui',
+};
+const TPL_NOTE = '🧪 Template — every parameter is editable. Tune it, backtest on real data, verify it yourself, then Save as Bot. Not a profit claim.';
+
+export const TEMPLATE_SKILLS: BotSkillConfig[] = [
+  { ...TPL_BASE, name: 'template_ema_cross', signal: 'ema_cross',
+    emaFast: 9, emaSlow: 21,
+    description: `EMA Cross starter — fast EMA(9) crosses slow EMA(21). ${TPL_NOTE}` },
+  { ...TPL_BASE, name: 'template_ma_cross', signal: 'ma_cross',
+    maFast: 20, maSlow: 50,
+    description: `MA (SMA) Cross starter — fast SMA(20) crosses slow SMA(50). ${TPL_NOTE}` },
+  { ...TPL_BASE, name: 'template_bollinger', signal: 'bb',
+    bbPeriod: 20, bbStdDev: 2,
+    description: `Bollinger starter — buy a close back above the lower band, sell below the upper (period 20, 2σ). ${TPL_NOTE}` },
+  { ...TPL_BASE, name: 'template_rsi', signal: 'rsi',
+    rsiPeriod: 14, rsiOversold: 30, rsiOverbought: 70,
+    description: `RSI starter — buy crossing up through 30, sell crossing down through 70 (period 14). ${TPL_NOTE}` },
+  { ...TPL_BASE, name: 'template_supertrend', signal: 'supertrend_flip',
+    supertrendPeriod: 10, supertrendMult: 3,
+    description: `Supertrend starter — enter on each Supertrend flip (ATR 10, mult 3). ${TPL_NOTE}` },
+  { ...TPL_BASE, name: 'template_combo_ema_adx', signal: 'ema_cross',
+    emaFast: 9, emaSlow: 21,
+    filters: [
+      { id: 'adx', indicator: 'adx', period: 14, op: '>', value: 25 },
+      { id: 'sma', indicator: 'sma', period: 200, op: 'align' },
+    ],
+    description: `Combo starter — EMA(9/21) Cross gated by ADX(14) > 25 (strong trend) AND price aligned with SMA(200). Main indicator + 2 filters. ${TPL_NOTE}` },
+];
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 export function loadBotSkills(): BotSkillConfig[] {
@@ -400,6 +448,10 @@ export function generateIndexJs(skill: BotSkillConfig): string {
   const signalLogic: Record<IndicatorType, string> = {
     ema_cross: `
   // EMA Cross: ema9 vượt lên trên ema21 → BUY; ema9 xuống dưới ema21 → SELL
+  if (prev_ema9 <= prev_ema21 && ema9 > ema21) signal = 'BUY';
+  else if (prev_ema9 >= prev_ema21 && ema9 < ema21) signal = 'SELL';`,
+    ma_cross: `
+  // MA (SMA) Cross: fast SMA crosses the slow SMA
   if (prev_ema9 <= prev_ema21 && ema9 > ema21) signal = 'BUY';
   else if (prev_ema9 >= prev_ema21 && ema9 < ema21) signal = 'SELL';`,
     rsi: `

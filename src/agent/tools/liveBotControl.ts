@@ -135,6 +135,9 @@ export const startAutoBot = new FunctionTool({
       // EA money-management module — same fields the backtester validated with.
       // Without these, a v2 skill started via chat would silently drop its
       // breakeven/cooldown/risk rules and trade differently from its backtest.
+      emaFast: skill.emaFast, emaSlow: skill.emaSlow, maFast: skill.maFast, maSlow: skill.maSlow,
+      rsiPeriod: skill.rsiPeriod, rsiOversold: skill.rsiOversold, rsiOverbought: skill.rsiOverbought,
+      bbPeriod: skill.bbPeriod, bbStdDev: skill.bbStdDev,
       supertrendPeriod:    skill.supertrendPeriod,
       supertrendMult:      skill.supertrendMult,
       breakoutPeriod:      skill.breakoutPeriod,

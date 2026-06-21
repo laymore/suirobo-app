@@ -12,7 +12,7 @@ import {
   type FilterBlock, type FilterIndicator, type FilterOp,
 } from '../agent/backtestEngine';
 import {
-  loadBotSkills, upsertBotSkill, PRESET_SKILLS,
+  loadBotSkills, upsertBotSkill, PRESET_SKILLS, TEMPLATE_SKILLS,
   type BotSkillConfig,
 } from '../types/botSkill';
 import { useCurrentAccount } from '@mysten/dapp-kit';
@@ -27,18 +27,20 @@ const ASSET_CONFIGS = {
   btc: {
     label:  'BTC/USDT',
     flag:   '₿',
-    file:   (tf: string) => `/data/btc_full_2025_${tf}.json`,
+    file:   (tf: string, year: string) => year === '2026' ? `/data/btc_2026_${tf}.json` : `/data/btc_full_2025_${tf}.json`,
     period: 'Full year 2025',
     color:  '#f59e0b',
   },
   sui: {
     label:  'SUI/USDT',
     flag:   '💧',
-    file:   (tf: string) => `/data/sui_full_2025_${tf}.json`,
+    file:   (tf: string, year: string) => year === '2026' ? `/data/sui_2026_${tf}.json` : `/data/sui_full_2025_${tf}.json`,
     period: 'Full year 2025',
     color:  '#00d4ff',
   },
 } as const;
+// 2026 dataset covers Jan–May only (real Binance data fetched mid-2026).
+const MONTHS_BY_YEAR: Record<string, number> = { '2025': 12, '2026': 5 };
 
 type AssetKey = keyof typeof ASSET_CONFIGS;
 
@@ -52,6 +54,7 @@ const TF_OPTIONS_BACKTEST = [
 
 const INDICATOR_LABELS: Record<IndicatorType, string> = {
   ema_cross: 'EMA Cross (9/21)',
+  ma_cross:  'MA Cross (SMA 20/50)',
   rsi:       'RSI Momentum (30/70)',
   macd:      'MACD Histogram',
   bb:        'Bollinger Bands',
@@ -393,6 +396,17 @@ const StatCard: React.FC<{ label: string; value: string | number; sub?: string; 
     </div>
   );
 
+// A compact labeled number input for an indicator parameter (MT5 "inputs" style).
+const ParamRow: React.FC<{ label: string; value: number; onChange: (n: number) => void; step?: number }> =
+  ({ label, value, onChange, step = 1 }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ flex: 1, fontSize: '0.66rem', color: '#64748b' }}>{label}</span>
+      <input type="number" step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        style={{ width: 70, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 6px', color: '#e2e8f0', fontSize: '0.7rem', textAlign: 'right' }} />
+    </div>
+  );
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 interface Props {
@@ -404,6 +418,9 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   // ── Bot Skills ──
   const [botSkills,      setBotSkills]      = useState<BotSkillConfig[]>([]);
   const [activeBotSkill, setActiveBotSkill] = useState<BotSkillConfig | null>(null);
+  // True once the user edits a loaded skill — keeps the dropdown showing what they
+  // started from (no jarring reset) while suppressing auto-stat-save onto a preset.
+  const [dirty,          setDirty]          = useState(false);
 
   // ── Config ──
   // Defaults preset to the backtest-winning bb_meanrev_m15 strategy
@@ -421,9 +438,18 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   const [direction,      setDirection]      = useState<'both'|'long_only'|'short_only'>('both');
   // EA-style extra AND-filters layered on top of the entry signal.
   const [filters,        setFilters]        = useState<FilterBlock[]>([]);
+  // Tunable entry-indicator inputs (shown per selected indicator).
+  const [emaFast, setEmaFast] = useState(9);   const [emaSlow, setEmaSlow] = useState(21);
+  const [maFast,  setMaFast]  = useState(20);  const [maSlow,  setMaSlow]  = useState(50);
+  const [rsiPeriod, setRsiPeriod] = useState(14); const [rsiOversold, setRsiOversold] = useState(30); const [rsiOverbought, setRsiOverbought] = useState(70);
+  const [bbPeriod, setBbPeriod] = useState(20); const [bbStdDev, setBbStdDev] = useState(2);
+  const [stPeriod, setStPeriod] = useState(10); const [stMult, setStMult] = useState(3);
+  const [bkPeriod, setBkPeriod] = useState(20);
   const [timeframe,      setTimeframe]      = useState('M15');
   // 'm1'..'m12' = one calendar month tested standalone (no full-year option)
   const [duration,       setDuration]       = useState<string>('m1');
+  // Dataset year: 2025 (full year) or 2026 (real Jan–May).
+  const [year,           setYear]           = useState<'2025' | '2026'>('2025');
 
   // ── Asset selection ──
   const [asset, setAsset] = useState<AssetKey>('sui');
@@ -454,7 +480,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   // ── Load bot skills ─────────────────────────────────────────────────
   useEffect(() => {
     const mergePresets = (list: BotSkillConfig[]): BotSkillConfig[] => {
-      const merged = [...PRESET_SKILLS];
+      const merged = [...TEMPLATE_SKILLS, ...PRESET_SKILLS];
       for (const s of list) {
         if (!merged.find(x => x.name === s.name)) merged.push(s);
       }
@@ -486,8 +512,16 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   // ── Apply bot skill → fill the whole config ─────────────────────
   const applyBotSkill = (skill: BotSkillConfig) => {
     setActiveBotSkill(skill);
+    setDirty(false);
     setIndicator(skill.signal);
     setFilters(skill.filters ? skill.filters.map(f => ({ ...f })) : []);
+    // Tunable entry-indicator inputs (fall back to classic defaults)
+    setEmaFast(skill.emaFast ?? 9); setEmaSlow(skill.emaSlow ?? 21);
+    setMaFast(skill.maFast ?? 20);  setMaSlow(skill.maSlow ?? 50);
+    setRsiPeriod(skill.rsiPeriod ?? 14); setRsiOversold(skill.rsiOversold ?? 30); setRsiOverbought(skill.rsiOverbought ?? 70);
+    setBbPeriod(skill.bbPeriod ?? 20); setBbStdDev(skill.bbStdDev ?? 2);
+    setStPeriod(skill.supertrendPeriod ?? 10); setStMult(skill.supertrendMult ?? 3);
+    setBkPeriod(skill.breakoutPeriod ?? 20);
     setTakeProfitPct(skill.takeProfitPct);
     setStopLossPct(skill.stopLossPct);
     setTrailingStopPct(skill.trailingStopPct);
@@ -528,8 +562,12 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   // ── Save the currently-tested config as a NEW local bot (→ My Bot) ──
   const handleSaveAsBot = () => {
     if (!result) { alert('Run a backtest first, then save the result as a bot.'); return; }
-    const isPreset = activeBotSkill && PRESET_SKILLS.some(p => p.name === activeBotSkill.name);
-    const suggested = activeBotSkill && !isPreset
+    // Presets & starter templates are read-only — and an edited copy of any skill
+    // should become a NEW bot, so suggest a fresh name in those cases.
+    const isLocked = activeBotSkill && (
+      PRESET_SKILLS.some(p => p.name === activeBotSkill.name) ||
+      TEMPLATE_SKILLS.some(t => t.name === activeBotSkill.name));
+    const suggested = activeBotSkill && !isLocked && !dirty
       ? activeBotSkill.name
       : `${indicator}_${timeframe.toLowerCase()}_${Date.now().toString().slice(-4)}`;
     const input = window.prompt('Save as Bot — name (lowercase letters, numbers, underscores):', suggested);
@@ -548,11 +586,12 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
       direction,
       takeProfitPct, stopLossPct, trailingStopPct, enableTrailing, enableDefense,
       leverage, orderPct, commission,
-      // EA params aren't editable in the backtest form — carry them over from the
-      // active skill so editing a preset keeps its supertrend/HTF/MM settings.
-      supertrendPeriod:    activeBotSkill?.supertrendPeriod,
-      supertrendMult:      activeBotSkill?.supertrendMult,
-      breakoutPeriod:      activeBotSkill?.breakoutPeriod,
+      // Tunable entry-indicator inputs (now editable in the form).
+      emaFast, emaSlow, maFast, maSlow,
+      rsiPeriod, rsiOversold, rsiOverbought, bbPeriod, bbStdDev,
+      supertrendPeriod:    stPeriod,
+      supertrendMult:      stMult,
+      breakoutPeriod:      bkPeriod,
       maxBarsInTrade:      activeBotSkill?.maxBarsInTrade,
       htfMinutes:          activeBotSkill?.htfMinutes,
       htfSupertrendPeriod: activeBotSkill?.htfSupertrendPeriod,
@@ -592,16 +631,15 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   useEffect(() => {
     setIsLoading(true);
     setResult(null);
-    const url = ASSET_CONFIGS[asset].file(timeframe);
+    const url = ASSET_CONFIGS[asset].file(timeframe, year);
     fetch(url)
       .then(r => r.json())
-      .then((d: Candle[]) => { 
-        const patched = d.map(c => ({ ...c, date: c.date.replace('2025', '2026') }));
-        setBtcData(patched); 
-        setIsLoading(false); 
+      .then((d: Candle[]) => {
+        setBtcData(d);              // real dates as-is (2025 file = 2025, 2026 file = 2026)
+        setIsLoading(false);
       })
       .catch(() => setIsLoading(false));
-  }, [timeframe, asset]);
+  }, [timeframe, asset, year]);
 
   // ── Filtered data by duration (single calendar month or full dataset) ──
   const filteredData = useMemo(() => {
@@ -625,6 +663,9 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
     takeProfitPct, stopLossPct, trailingStopPct,
     enableTrailing, enableDefense, indicator, direction,
     filters: filters.length ? filters : undefined,
+    emaFast, emaSlow, maFast, maSlow,
+    rsiPeriod, rsiOversold, rsiOverbought, bbPeriod, bbStdDev,
+    supertrendPeriod: stPeriod, supertrendMult: stMult, breakoutPeriod: bkPeriod,
   };
 
   // ── Run backtest (instant) ──────────────────────────────────────────
@@ -639,9 +680,11 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
       setIsPlaying(false);
       setIsRunning(false);
       // Auto-save stats to the Bot Skill if active
-      if (activeBotSkill) saveStatsToBotSkill(res);
+      // Only write stats back to the loaded skill when it's unchanged — once the
+      // user edits, the config has diverged so the stats no longer describe it.
+      if (activeBotSkill && !dirty) saveStatsToBotSkill(res);
     }, 10);
-  }, [filteredData, cfg, activeBotSkill]);
+  }, [filteredData, cfg, activeBotSkill, dirty]);
 
   // ── Draw chart ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -823,13 +866,33 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
                   ))}
                 </div>
               </div>
+              {/* Year — 2025 (full) or 2026 (real Jan–May) */}
+              <div>
+                <label style={{ fontSize: '0.68rem', color: '#64748b' }}>Year</label>
+                <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+                  {(['2025', '2026'] as const).map(y => (
+                    <button key={y} onClick={() => {
+                      setYear(y); setResult(null);
+                      // clamp month if the new year has fewer months
+                      const max = MONTHS_BY_YEAR[y];
+                      if (duration.startsWith('m') && parseInt(duration.slice(1)) > max) setDuration('m1');
+                    }} style={{
+                      flex: 1, padding: '5px 2px', borderRadius: 6,
+                      border: `1px solid ${year === y ? '#00d4ff' : '#1e293b'}`,
+                      background: year === y ? 'rgba(0,212,255,0.12)' : 'transparent',
+                      color: year === y ? '#00d4ff' : '#475569', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+                    }}>{y}{y === '2026' ? ' · Jan–May' : ''}</button>
+                  ))}
+                </div>
+              </div>
+
               {/* Range — pick a single calendar month (each tested standalone) */}
               <div>
                 <label style={{ fontSize: '0.68rem', color: '#64748b' }}>Month</label>
                 <select value={duration} onChange={e => { setDuration(e.target.value as any); setResult(null); }}
                   style={{ width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '5px 8px', color: '#e2e8f0', fontSize: '0.75rem', marginTop: 3 }}>
-                  {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
-                    <option key={m} value={`m${i + 1}`}>{m} 2025</option>
+                  {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].slice(0, MONTHS_BY_YEAR[year]).map((m, i) => (
+                    <option key={m} value={`m${i + 1}`}>{m} {year}</option>
                   ))}
                 </select>
               </div>
@@ -857,9 +920,9 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
                 ))}
               </select>
               {activeBotSkill && (
-                <div style={{ marginTop: 6, fontSize: '0.65rem', color: '#6366f1', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>✅ {activeBotSkill.name}</span>
-                  <button onClick={() => setActiveBotSkill(null)}
+                <div style={{ marginTop: 6, fontSize: '0.65rem', color: dirty ? '#f59e0b' : '#6366f1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{dirty ? `✎ ${activeBotSkill.name} · edited (Save makes a new bot)` : `✅ ${activeBotSkill.name}`}</span>
+                  <button onClick={() => { setActiveBotSkill(null); setDirty(false); }}
                     style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '0.65rem' }}>✕</button>
                 </div>
               )}
@@ -869,12 +932,25 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
           {/* Indicator */}
           <section>
             <div style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📡 Indicator</div>
-            <select value={indicator} onChange={e => { setIndicator(e.target.value as IndicatorType); setActiveBotSkill(null); }}
+            <select value={indicator} onChange={e => { setIndicator(e.target.value as IndicatorType); setDirty(true); }}
               style={{ width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '5px 8px', color: '#e2e8f0', fontSize: '0.73rem' }}>
               {(Object.entries(INDICATOR_LABELS) as [IndicatorType, string][]).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
+            {/* Indicator parameters (editable, per selected indicator) */}
+            {(() => { const chg = (s: (n: number) => void) => (n: number) => { s(n); setDirty(true); }; return (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5, background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 10px' }}>
+              {indicator === 'ema_cross' && (<><ParamRow label="Fast EMA" value={emaFast} onChange={chg(setEmaFast)} /><ParamRow label="Slow EMA" value={emaSlow} onChange={chg(setEmaSlow)} /></>)}
+              {indicator === 'ma_cross' && (<><ParamRow label="Fast SMA" value={maFast} onChange={chg(setMaFast)} /><ParamRow label="Slow SMA" value={maSlow} onChange={chg(setMaSlow)} /></>)}
+              {indicator === 'rsi' && (<><ParamRow label="RSI period" value={rsiPeriod} onChange={chg(setRsiPeriod)} /><ParamRow label="Oversold" value={rsiOversold} onChange={chg(setRsiOversold)} /><ParamRow label="Overbought" value={rsiOverbought} onChange={chg(setRsiOverbought)} /></>)}
+              {indicator === 'bb' && (<><ParamRow label="BB period" value={bbPeriod} onChange={chg(setBbPeriod)} /><ParamRow label="Std Dev (σ)" value={bbStdDev} onChange={chg(setBbStdDev)} step={0.1} /></>)}
+              {(indicator === 'supertrend' || indicator === 'supertrend_flip') && (<><ParamRow label="ATR period" value={stPeriod} onChange={chg(setStPeriod)} /><ParamRow label="Multiplier" value={stMult} onChange={chg(setStMult)} step={0.1} /></>)}
+              {indicator === 'range_breakout' && <ParamRow label="Breakout bars" value={bkPeriod} onChange={chg(setBkPeriod)} />}
+              {indicator === 'macd' && <div style={{ fontSize: '0.6rem', color: '#475569' }}>MACD 12 / 26 / 9 (standard)</div>}
+              {indicator === 'rsi_macd' && <div style={{ fontSize: '0.6rem', color: '#475569' }}>RSI 14 + MACD 12/26/9 hybrid</div>}
+            </div>
+            ); })()}
             {/* Direction filter */}
             <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
               {(['both','long_only','short_only'] as const).map(d => (
@@ -894,7 +970,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>🧩 Entry Filters · AND</span>
               <button
-                onClick={() => { setFilters(f => [...f, { id: `f${f.length}_${Date.now().toString().slice(-4)}`, indicator: 'adx', period: 14, op: '>', value: 25 }]); setActiveBotSkill(null); }}
+                onClick={() => { setFilters(f => [...f, { id: `f${f.length}_${Date.now().toString().slice(-4)}`, indicator: 'adx', period: 14, op: '>', value: 25 }]); setDirty(true); }}
                 style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid #6366f1', color: '#818cf8', borderRadius: 5, padding: '2px 8px', fontSize: '0.62rem', cursor: 'pointer', fontWeight: 700 }}>
                 + Add
               </button>
@@ -905,7 +981,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {filters.map((f, idx) => {
                 const meta = FILTER_META[f.indicator];
-                const update = (patch: Partial<FilterBlock>) => { setFilters(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x)); setActiveBotSkill(null); };
+                const update = (patch: Partial<FilterBlock>) => { setFilters(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x)); setDirty(true); };
                 const ops: FilterOp[] = meta.kind === 'ma' ? ['align', 'against'] : ['>', '<'];
                 return (
                   <div key={f.id} style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 6, padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -914,7 +990,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
                         style={{ flex: 1, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 5px', color: '#e2e8f0', fontSize: '0.66rem' }}>
                         {(Object.keys(FILTER_META) as FilterIndicator[]).map(k => <option key={k} value={k}>{FILTER_META[k].label}</option>)}
                       </select>
-                      <button onClick={() => { setFilters(arr => arr.filter((_, i) => i !== idx)); setActiveBotSkill(null); }}
+                      <button onClick={() => { setFilters(arr => arr.filter((_, i) => i !== idx)); setDirty(true); }}
                         style={{ background: 'transparent', border: '1px solid #7f1d1d', color: '#ef4444', borderRadius: 5, padding: '2px 7px', fontSize: '0.7rem', cursor: 'pointer' }}>✕</button>
                     </div>
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

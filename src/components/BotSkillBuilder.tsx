@@ -22,6 +22,7 @@ const SIGNALS: IndicatorType[] = ['ema_cross', 'rsi', 'macd', 'bb', 'rsi_macd', 
 
 const SIGNAL_DESC: Record<IndicatorType, string> = {
   ema_cross: 'EMA9 crosses above EMA21 → Buy | EMA9 crosses below → Sell',
+  ma_cross:  'Fast SMA crosses above slow SMA → Buy | crosses below → Sell',
   rsi:       'RSI crosses above 30 → Buy | RSI drops below 70 → Sell',
   macd:      'MACD histogram crossing negative → positive = BUY | reverse = SELL',
   bb:        'Price bounces off lower Bollinger band → Buy | off upper band → Sell',

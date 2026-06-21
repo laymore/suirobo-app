@@ -15,7 +15,7 @@ export interface Candle {
   volume: number;
 }
 
-export type IndicatorType = 'ema_cross' | 'rsi' | 'macd' | 'bb' | 'rsi_macd' | 'supertrend' | 'supertrend_flip' | 'range_breakout';
+export type IndicatorType = 'ema_cross' | 'ma_cross' | 'rsi' | 'macd' | 'bb' | 'rsi_macd' | 'supertrend' | 'supertrend_flip' | 'range_breakout';
 
 export interface BacktestConfig {
   initialCapital: number;
@@ -35,6 +35,12 @@ export interface BacktestConfig {
   // every Supertrend EA. Apply to 'supertrend' and 'supertrend_flip' signals.
   supertrendPeriod?: number;  // default 10
   supertrendMult?: number;    // default 3
+
+  // Tunable entry-indicator inputs (EMA/MA/RSI/Bollinger). See EntryParams.
+  emaFast?: number; emaSlow?: number;
+  maFast?: number;  maSlow?: number;
+  rsiPeriod?: number; rsiOversold?: number; rsiOverbought?: number;
+  bbPeriod?: number; bbStdDev?: number;
 
   // Range-breakout EA inputs ('range_breakout' signal): enter when the close
   // breaks the prior N-bar high (buy) / low (sell) — Donchian-style momentum.
@@ -224,8 +230,10 @@ export function calcMargin(
 }
 
 export interface Indicators {
-  ema9: number[];
-  ema21: number[];
+  ema9: number[];   // EMA "fast" (period configurable via EntryParams.emaFast)
+  ema21: number[];  // EMA "slow" (EntryParams.emaSlow)
+  maFast: number[]; // SMA fast (EntryParams.maFast) — for MA Cross
+  maSlow: number[]; // SMA slow (EntryParams.maSlow)
   rsi: number[];
   macdLine: number[];
   signalLine: number[];
@@ -274,10 +282,29 @@ export interface BacktestResult {
 
 // ─── Indicator Computations ───────────────────────────────────────────────────
 
-export function computeIndicators(data: Candle[], supertrendMult = 3, supertrendPeriod = 10, breakoutPeriod = 20): Indicators {
+// Tunable entry-indicator inputs (MT5-style). All optional — defaults reproduce
+// the original hard-coded values, so existing bots behave identically.
+export interface EntryParams {
+  emaFast?: number; emaSlow?: number;          // EMA Cross (default 9 / 21)
+  maFast?: number;  maSlow?: number;           // MA (SMA) Cross (default 20 / 50)
+  rsiPeriod?: number; rsiOversold?: number; rsiOverbought?: number; // RSI (14, 30/70)
+  bbPeriod?: number; bbStdDev?: number;        // Bollinger (20, 2σ)
+}
+
+export function computeIndicators(
+  data: Candle[], supertrendMult = 3, supertrendPeriod = 10, breakoutPeriod = 20,
+  p: EntryParams = {},
+): Indicators {
   const n = data.length;
-  const ema9      = new Array(n).fill(0);
-  const ema21     = new Array(n).fill(0);
+  const emaFastP = Math.max(2, p.emaFast ?? 9), emaSlowP = Math.max(2, p.emaSlow ?? 21);
+  const maFastP  = Math.max(2, p.maFast  ?? 20), maSlowP = Math.max(2, p.maSlow ?? 50);
+  const rsiP     = Math.max(2, p.rsiPeriod ?? 14);
+  const bbP      = Math.max(2, p.bbPeriod ?? 20), bbK = p.bbStdDev ?? 2;
+
+  const ema9      = new Array(n).fill(0);   // "fast" EMA (period = emaFastP)
+  const ema21     = new Array(n).fill(0);   // "slow" EMA (period = emaSlowP)
+  const maFast    = new Array(n).fill(0);
+  const maSlow    = new Array(n).fill(0);
   const rsi       = new Array(n).fill(50);
   const macdLine  = new Array(n).fill(0);
   const signalLine= new Array(n).fill(0);
@@ -286,8 +313,8 @@ export function computeIndicators(data: Candle[], supertrendMult = 3, supertrend
   const bbBasis   = new Array(n).fill(0);
   const bbLower   = new Array(n).fill(0);
 
-  // EMA 9 & 21
-  const k9 = 2 / 10, k21 = 2 / 22;
+  // EMA fast & slow
+  const k9 = 2 / (emaFastP + 1), k21 = 2 / (emaSlowP + 1);
   let e9 = data[0].close, e21 = data[0].close;
   ema9[0] = e9; ema21[0] = e21;
   for (let i = 1; i < n; i++) {
@@ -297,24 +324,33 @@ export function computeIndicators(data: Candle[], supertrendMult = 3, supertrend
     ema21[i] = e21;
   }
 
-  // RSI 14
-  if (n > 15) {
+  // SMA fast & slow (for MA Cross)
+  let sf = 0, ssl = 0;
+  for (let i = 0; i < n; i++) {
+    sf += data[i].close; if (i >= maFastP) sf -= data[i - maFastP].close;
+    maFast[i] = i >= maFastP - 1 ? sf / maFastP : data[i].close;
+    ssl += data[i].close; if (i >= maSlowP) ssl -= data[i - maSlowP].close;
+    maSlow[i] = i >= maSlowP - 1 ? ssl / maSlowP : data[i].close;
+  }
+
+  // RSI (configurable period)
+  if (n > rsiP + 1) {
     let ag = 0, al = 0;
-    for (let i = 1; i <= 14; i++) {
+    for (let i = 1; i <= rsiP; i++) {
       const d = data[i].close - data[i - 1].close;
       if (d > 0) ag += d; else al -= d;
     }
-    ag /= 14; al /= 14;
-    rsi[14] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
-    for (let i = 15; i < n; i++) {
+    ag /= rsiP; al /= rsiP;
+    rsi[rsiP] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    for (let i = rsiP + 1; i < n; i++) {
       const d = data[i].close - data[i - 1].close;
-      ag = (ag * 13 + Math.max(d, 0)) / 14;
-      al = (al * 13 + Math.max(-d, 0)) / 14;
+      ag = (ag * (rsiP - 1) + Math.max(d, 0)) / rsiP;
+      al = (al * (rsiP - 1) + Math.max(-d, 0)) / rsiP;
       rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
     }
   }
 
-  // MACD (12, 26, 9)
+  // MACD (12, 26, 9) — standard, not user-tuned
   const k12 = 2 / 13, k26 = 2 / 27, ks = 2 / 10;
   let e12 = data[0].close, e26 = data[0].close, sig = 0;
   for (let i = 1; i < n; i++) {
@@ -326,17 +362,17 @@ export function computeIndicators(data: Candle[], supertrendMult = 3, supertrend
     histogram[i]  = macdLine[i] - sig;
   }
 
-  // Bollinger Bands (20 period, 2σ)
-  for (let i = 19; i < n; i++) {
+  // Bollinger Bands (configurable period + σ)
+  for (let i = bbP - 1; i < n; i++) {
     let sum = 0;
-    for (let j = i - 19; j <= i; j++) sum += data[j].close;
-    const mean = sum / 20;
+    for (let j = i - bbP + 1; j <= i; j++) sum += data[j].close;
+    const mean = sum / bbP;
     let vsum = 0;
-    for (let j = i - 19; j <= i; j++) vsum += (data[j].close - mean) ** 2;
-    const std = Math.sqrt(vsum / 20);
+    for (let j = i - bbP + 1; j <= i; j++) vsum += (data[j].close - mean) ** 2;
+    const std = Math.sqrt(vsum / bbP);
     bbBasis[i] = mean;
-    bbUpper[i] = mean + 2 * std;
-    bbLower[i] = mean - 2 * std;
+    bbUpper[i] = mean + bbK * std;
+    bbLower[i] = mean - bbK * std;
   }
 
   // SuperTrend (10, 3 or custom)
@@ -413,7 +449,7 @@ export function computeIndicators(data: Candle[], supertrendMult = 3, supertrend
     }
   }
 
-  return { ema9, ema21, rsi, macdLine, signalLine, histogram, bbUpper, bbBasis, bbLower, superTrend, superTrendDir, donchianHigh, donchianLow };
+  return { ema9, ema21, maFast, maSlow, rsi, macdLine, signalLine, histogram, bbUpper, bbBasis, bbLower, superTrend, superTrendDir, donchianHigh, donchianLow };
 }
 
 // ─── Entry Filters (EA-style "1 entry + N filters" model) ─────────────────────
@@ -568,18 +604,25 @@ export function passesFilters(
 
 // ─── Signal Detection ─────────────────────────────────────────────────────────
 
-function getSignal(i: number, data: Candle[], ind: Indicators, indicator: IndicatorType) {
+function getSignal(i: number, data: Candle[], ind: Indicators, indicator: IndicatorType, p: EntryParams = {}) {
   if (i < 30) return { buy: false, sell: false };
+  const rsiLo = p.rsiOversold   ?? 30;
+  const rsiHi = p.rsiOverbought ?? 70;
   switch (indicator) {
     case 'ema_cross':
       return {
         buy:  ind.ema9[i-1] <= ind.ema21[i-1] && ind.ema9[i] > ind.ema21[i],
         sell: ind.ema9[i-1] >= ind.ema21[i-1] && ind.ema9[i] < ind.ema21[i],
       };
+    case 'ma_cross':
+      return {
+        buy:  ind.maFast[i-1] <= ind.maSlow[i-1] && ind.maFast[i] > ind.maSlow[i],
+        sell: ind.maFast[i-1] >= ind.maSlow[i-1] && ind.maFast[i] < ind.maSlow[i],
+      };
     case 'rsi':
       return {
-        buy:  ind.rsi[i-1] < 30 && ind.rsi[i] >= 30,
-        sell: ind.rsi[i-1] > 70 && ind.rsi[i] <= 70,
+        buy:  ind.rsi[i-1] < rsiLo && ind.rsi[i] >= rsiLo,
+        sell: ind.rsi[i-1] > rsiHi && ind.rsi[i] <= rsiHi,
       };
     case 'macd':
       return {
@@ -712,7 +755,12 @@ function computeStats(
 
 export function runBacktest(data: Candle[], cfg: BacktestConfig): BacktestResult {
   const t0 = performance.now();
-  const indicators = computeIndicators(data, cfg.supertrendMult ?? 3, cfg.supertrendPeriod ?? 10, cfg.breakoutPeriod ?? 20);
+  const ep: EntryParams = {
+    emaFast: cfg.emaFast, emaSlow: cfg.emaSlow, maFast: cfg.maFast, maSlow: cfg.maSlow,
+    rsiPeriod: cfg.rsiPeriod, rsiOversold: cfg.rsiOversold, rsiOverbought: cfg.rsiOverbought,
+    bbPeriod: cfg.bbPeriod, bbStdDev: cfg.bbStdDev,
+  };
+  const indicators = computeIndicators(data, cfg.supertrendMult ?? 3, cfg.supertrendPeriod ?? 10, cfg.breakoutPeriod ?? 20, ep);
   const filterSeries = computeFilterSeries(data, cfg.filters);
   // MTF filter: direction of the last CLOSED HTF Supertrend per base bar
   const htfDir = cfg.htfMinutes
@@ -770,7 +818,7 @@ export function runBacktest(data: Candle[], cfg: BacktestConfig): BacktestResult
 
       // Shared EA management block — identical code path to the live bot.
       if (!raed) {
-        const opp  = getSignal(i, data, indicators, cfg.indicator);
+        const opp  = getSignal(i, data, indicators, cfg.indicator, ep);
         const exit = manageExit(cfg, pos, candle, opp);
         if (exit) { exitPrice = exit.price; reason = exit.reason; raed = true; }
       }
@@ -825,7 +873,7 @@ export function runBacktest(data: Candle[], cfg: BacktestConfig): BacktestResult
                         i - lastExitIndex <= cfg.cooldownBars!;
 
     if (!pos && capital > 1 && !dayHalted && !consecHalt && !coolingDown && inSession(candle.date, cfg)) {
-      let { buy, sell } = getSignal(i, data, indicators, cfg.indicator);
+      let { buy, sell } = getSignal(i, data, indicators, cfg.indicator, ep);
       // Direction filter
       if (cfg.direction === 'long_only')  sell = false;
       if (cfg.direction === 'short_only') buy  = false;
@@ -927,7 +975,7 @@ export function detectLiveSignal(
     supertrendMult?: number; supertrendPeriod?: number; breakoutPeriod?: number;
     htfMinutes?: number; htfSupertrendPeriod?: number; htfSupertrendMult?: number;
     filters?: FilterBlock[];
-  },
+  } & EntryParams,
 ): {
   buy: boolean;
   sell: boolean;
@@ -937,14 +985,19 @@ export function detectLiveSignal(
     macdHist: number; bbUpper: number; bbLower: number;
   };
 } {
-  const ind = computeIndicators(candles, opts?.supertrendMult ?? 3, opts?.supertrendPeriod ?? 10, opts?.breakoutPeriod ?? 20);
+  const ep: EntryParams = {
+    emaFast: opts?.emaFast, emaSlow: opts?.emaSlow, maFast: opts?.maFast, maSlow: opts?.maSlow,
+    rsiPeriod: opts?.rsiPeriod, rsiOversold: opts?.rsiOversold, rsiOverbought: opts?.rsiOverbought,
+    bbPeriod: opts?.bbPeriod, bbStdDev: opts?.bbStdDev,
+  };
+  const ind = computeIndicators(candles, opts?.supertrendMult ?? 3, opts?.supertrendPeriod ?? 10, opts?.breakoutPeriod ?? 20, ep);
   const n   = candles.length;
   if (n < 32) return {
     buy: false, sell: false, indicators: ind,
     lastValues: { rsi: 50, ema9: 0, ema21: 0, macdHist: 0, bbUpper: 0, bbLower: 0 },
   };
 
-  let { buy, sell } = getSignal(n - 1, candles, ind, indicator);
+  let { buy, sell } = getSignal(n - 1, candles, ind, indicator, ep);
   if (direction === 'long_only')  sell = false;
   if (direction === 'short_only') buy  = false;
   // MTF filter — identical rule to the backtester (closed HTF candles only)
@@ -992,6 +1045,10 @@ export function configFromBotSkill(
     commission: number;
     direction: 'both' | 'long_only' | 'short_only';
     filters?: FilterBlock[];
+    // Tunable entry-indicator inputs (optional)
+    emaFast?: number; emaSlow?: number; maFast?: number; maSlow?: number;
+    rsiPeriod?: number; rsiOversold?: number; rsiOverbought?: number;
+    bbPeriod?: number; bbStdDev?: number;
     // Supertrend EA inputs (optional)
     supertrendPeriod?: number;
     supertrendMult?: number;
@@ -1026,6 +1083,9 @@ export function configFromBotSkill(
     indicator:       skill.signal,
     filters:         skill.filters,
     direction:       skill.direction,
+    emaFast: skill.emaFast, emaSlow: skill.emaSlow, maFast: skill.maFast, maSlow: skill.maSlow,
+    rsiPeriod: skill.rsiPeriod, rsiOversold: skill.rsiOversold, rsiOverbought: skill.rsiOverbought,
+    bbPeriod: skill.bbPeriod, bbStdDev: skill.bbStdDev,
     supertrendPeriod: skill.supertrendPeriod,
     supertrendMult:   skill.supertrendMult,
     breakoutPeriod:   skill.breakoutPeriod,

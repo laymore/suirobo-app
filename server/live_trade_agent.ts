@@ -59,6 +59,10 @@ export interface LiveBotConfig {
   // Per-user objects from deeptrade_xbtc_setup. Required to place REAL DeepTrade orders.
   balanceManagerId?: string;
   feeManagerId?:     string;
+  // ── Tunable entry-indicator inputs (EMA/MA/RSI/Bollinger) ──
+  emaFast?: number; emaSlow?: number; maFast?: number; maSlow?: number;
+  rsiPeriod?: number; rsiOversold?: number; rsiOverbought?: number;
+  bbPeriod?: number; bbStdDev?: number;
   // ── Supertrend EA inputs (ATR period + multiplier) ──
   supertrendPeriod?: number;
   supertrendMult?:   number;
@@ -1011,7 +1015,10 @@ async function tradingTick() {
     const { buy, sell, lastValues } = detectLiveSignal(closed, cfg.signal, cfg.direction,
       { supertrendMult: cfg.supertrendMult, supertrendPeriod: cfg.supertrendPeriod, breakoutPeriod: cfg.breakoutPeriod,
         htfMinutes: cfg.htfMinutes, htfSupertrendPeriod: cfg.htfSupertrendPeriod, htfSupertrendMult: cfg.htfSupertrendMult,
-        filters: cfg.filters });
+        filters: cfg.filters,
+        emaFast: cfg.emaFast, emaSlow: cfg.emaSlow, maFast: cfg.maFast, maSlow: cfg.maSlow,
+        rsiPeriod: cfg.rsiPeriod, rsiOversold: cfg.rsiOversold, rsiOverbought: cfg.rsiOverbought,
+        bbPeriod: cfg.bbPeriod, bbStdDev: cfg.bbStdDev });
     state.lastIndicators = lastValues;
     state.lastSignal     = buy ? 'BUY' : sell ? 'SELL' : 'HOLD';
 
