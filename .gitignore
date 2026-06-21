@@ -96,3 +96,6 @@ test-e2e-*.cjs
 fetch_docs.js
 server/inspect_*.ts
 server/check-*.ts
+
+# Claude Code local skills/config — keep on machine only
+.claude/
