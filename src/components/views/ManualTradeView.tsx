@@ -603,6 +603,12 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
     // so check the wallet balance — NOT the BalanceManager vault balance,
     // which is usually 0 and was blocking every open attempt.
     if (col > suiBalance) return showToast(`Wallet ${currentMarginPool.base} balance is insufficient (have ${suiBalance.toFixed(2)})`, 'error');
+    // DeepBook SUI_USDC needs a position of at least 1 SUI (collateral × leverage).
+    // A smaller market order aborts in pool_proxy::calculate_effective_price (code 5).
+    if (marginPoolKey === 'SUI_USDC') {
+      const posSize = col * marginLeverage;
+      if (posSize < 1) return showToast(`Position too small: ${col} ${currentMarginPool.base} × ${marginLeverage}x = ${posSize.toFixed(2)} SUI. DeepBook needs ≥ 1 SUI — raise your collateral or leverage.`, 'error');
+    }
 
     setIsExecuting(true);
     showToast(`Preparing to open margin position ${currentMarginPool.base}...`, 'info');
@@ -1178,6 +1184,7 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
   const [marginPoolAssets, setMarginPoolAssets] = useState<{
     base: number; quote: number; totalBase: number; totalQuote: number;
     hasDebt: boolean; debtBase: boolean; debtQuote: boolean;
+    realDebtBase?: number; realDebtQuote?: number;
   } | null>(null);
   const [marginPoolBusy,   setMarginPoolBusy]   = useState(false);
   // Real DeepBook margin orders (open/filled/canceled) for the wallet's manager,
@@ -1251,6 +1258,7 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       if (bestAcc) setMarginPoolAssets({
         base: bestAcc.base, quote: bestAcc.quote, totalBase: bestAcc.totalBase, totalQuote: bestAcc.totalQuote,
         hasDebt: bestAcc.hasDebt, debtBase: bestAcc.debtBase, debtQuote: bestAcc.debtQuote,
+        realDebtBase: bestAcc.realDebtBase, realDebtQuote: bestAcc.realDebtQuote,
       });
 
       // DeepBook orders for every manager — try BOTH the internal balance manager id
@@ -1385,12 +1393,22 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
       // Withdraw — cap at the LIQUID bag balance, not the total valuation.
       // Exceeding it aborts on-chain with EBalanceTooLow (code 3).
       const liquid = marginColAsset === 'SUI' ? (marginPoolAssets?.base ?? 0) : (marginPoolAssets?.quote ?? 0);
-      if (amt > liquid) {
-        return showToast(
-          `Cannot withdraw ${amt} ${marginColAsset} — only ${liquid.toFixed(2)} is liquid. ` +
-          (marginPoolAssets?.hasDebt ? 'The rest is locked as collateral for an open borrow.' : 'Click ↻ Refresh to update.'),
-          'error'
-        );
+      const rDebtBase  = (marginPoolAssets as any)?.realDebtBase  ?? 0;
+      const rDebtQuote = (marginPoolAssets as any)?.realDebtQuote ?? 0;
+      const debtNote   = rDebtQuote > 0 ? `${rDebtQuote.toFixed(2)} USDC` : rDebtBase > 0 ? `${rDebtBase.toFixed(2)} SUI` : '';
+      if (marginPoolAssets?.hasDebt) {
+        // Still owes — the loan locks most of the collateral. Only the liquid
+        // excess can come out; the rest needs the debt repaid first.
+        if (amt > liquid) {
+          return showToast(
+            `⚠️ You still owe ${debtNote || 'a margin debt'} — repay it first with "Sell + Repay" (or "Close"). ` +
+            `Only ${liquid.toFixed(2)} ${marginColAsset} (not backing the loan) can be withdrawn right now.`,
+            'error'
+          );
+        }
+        showToast(`Note: an open borrow${debtNote ? ` of ${debtNote}` : ''} remains — withdrawing only the ${amt} liquid ${marginColAsset} that isn't backing it.`, 'info');
+      } else if (amt > liquid) {
+        return showToast(`Cannot withdraw ${amt} ${marginColAsset} — only ${liquid.toFixed(2)} is liquid. Click ↻ Refresh to update.`, 'error');
       }
     }
 
