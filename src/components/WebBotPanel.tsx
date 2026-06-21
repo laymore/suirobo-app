@@ -240,6 +240,7 @@ export const WebBotPanel: React.FC = () => {
   const signalOpts = useCallback((s: BotSkillConfig) => ({
     supertrendMult: s.supertrendMult, supertrendPeriod: s.supertrendPeriod, breakoutPeriod: s.breakoutPeriod,
     htfMinutes: s.htfMinutes, htfSupertrendPeriod: s.htfSupertrendPeriod, htfSupertrendMult: s.htfSupertrendMult,
+    filters: s.filters,
   }), []);
 
   // ── OPEN a position (build tx → wallet sign) ──

@@ -25,7 +25,7 @@ import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { DeepBookClient } from '@mysten/deepbook-v3';
-import { detectLiveSignal, manageExit, inSession, calcMargin, type Candle, type IndicatorType, type ExitReason } from '../src/agent/backtestEngine.js';
+import { detectLiveSignal, manageExit, inSession, calcMargin, type Candle, type IndicatorType, type ExitReason, type FilterBlock } from '../src/agent/backtestEngine.js';
 import { injectExecutionFee, injectBotOpenFee } from '../src/agent/tools/executionFee.js';
 import { buildOrderTx } from '../src/agent/tools/deeptrade_xbtc.js';
 
@@ -34,6 +34,7 @@ import { buildOrderTx } from '../src/agent/tools/deeptrade_xbtc.js';
 export interface LiveBotConfig {
   botSkillName:    string;
   signal:          IndicatorType;
+  filters?:        FilterBlock[];
   direction:       'both' | 'long_only' | 'short_only';
   takeProfitPct:   number;
   stopLossPct:     number;
@@ -1009,7 +1010,8 @@ async function tradingTick() {
 
     const { buy, sell, lastValues } = detectLiveSignal(closed, cfg.signal, cfg.direction,
       { supertrendMult: cfg.supertrendMult, supertrendPeriod: cfg.supertrendPeriod, breakoutPeriod: cfg.breakoutPeriod,
-        htfMinutes: cfg.htfMinutes, htfSupertrendPeriod: cfg.htfSupertrendPeriod, htfSupertrendMult: cfg.htfSupertrendMult });
+        htfMinutes: cfg.htfMinutes, htfSupertrendPeriod: cfg.htfSupertrendPeriod, htfSupertrendMult: cfg.htfSupertrendMult,
+        filters: cfg.filters });
     state.lastIndicators = lastValues;
     state.lastSignal     = buy ? 'BUY' : sell ? 'SELL' : 'HOLD';
 

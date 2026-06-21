@@ -9,6 +9,7 @@ import {
   runBacktest, configFromBotSkill,
   type Candle, type BacktestConfig, type BacktestResult,
   type IndicatorType, type Trade,
+  type FilterBlock, type FilterIndicator, type FilterOp,
 } from '../agent/backtestEngine';
 import {
   loadBotSkills, upsertBotSkill, PRESET_SKILLS,
@@ -58,6 +59,18 @@ const INDICATOR_LABELS: Record<IndicatorType, string> = {
   supertrend:'Supertrend wick-catch',
   supertrend_flip:'Supertrend Flip — EA',
   range_breakout:'Range Breakout — EA'
+};
+
+// EA-style entry-filter catalogue. `osc` filters compare a value vs a threshold
+// (>/<); `ma` filters are trend-direction aware (price above/below the MA).
+const FILTER_META: Record<FilterIndicator, { label: string; hasPeriod: boolean; kind: 'osc' | 'ma'; defPeriod: number; defValue: number; hint: string }> = {
+  adx:       { label: 'ADX (trend strength)', hasPeriod: true,  kind: 'osc', defPeriod: 14,  defValue: 25, hint: '> 25 = strong trend' },
+  rsi:       { label: 'RSI',                   hasPeriod: true,  kind: 'osc', defPeriod: 14,  defValue: 50, hint: '0-100' },
+  stoch:     { label: 'Stochastic %K',         hasPeriod: true,  kind: 'osc', defPeriod: 14,  defValue: 50, hint: '0-100' },
+  atr_pct:   { label: 'ATR % (volatility)',    hasPeriod: true,  kind: 'osc', defPeriod: 14,  defValue: 1,  hint: '% of price' },
+  macd_hist: { label: 'MACD histogram',        hasPeriod: false, kind: 'osc', defPeriod: 0,   defValue: 0,  hint: '> 0 bullish' },
+  sma:       { label: 'Price vs SMA',          hasPeriod: true,  kind: 'ma',  defPeriod: 200, defValue: 0,  hint: 'trend gate' },
+  ema:       { label: 'Price vs EMA',          hasPeriod: true,  kind: 'ma',  defPeriod: 200, defValue: 0,  hint: 'trend gate' },
 };
 
 const EXIT_COLORS: Record<string, string> = {
@@ -406,6 +419,8 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   const [enableTrailing, setEnableTrailing] = useState(false);
   const [enableDefense,  setEnableDefense]  = useState(true);
   const [direction,      setDirection]      = useState<'both'|'long_only'|'short_only'>('both');
+  // EA-style extra AND-filters layered on top of the entry signal.
+  const [filters,        setFilters]        = useState<FilterBlock[]>([]);
   const [timeframe,      setTimeframe]      = useState('M15');
   // 'm1'..'m12' = one calendar month tested standalone (no full-year option)
   const [duration,       setDuration]       = useState<string>('m1');
@@ -472,6 +487,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   const applyBotSkill = (skill: BotSkillConfig) => {
     setActiveBotSkill(skill);
     setIndicator(skill.signal);
+    setFilters(skill.filters ? skill.filters.map(f => ({ ...f })) : []);
     setTakeProfitPct(skill.takeProfitPct);
     setStopLossPct(skill.stopLossPct);
     setTrailingStopPct(skill.trailingStopPct);
@@ -528,6 +544,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
       version: '1.0.0',
       createdAt: new Date().toISOString(),
       signal: indicator,
+      filters: filters.length ? filters : undefined,
       direction,
       takeProfitPct, stopLossPct, trailingStopPct, enableTrailing, enableDefense,
       leverage, orderPct, commission,
@@ -607,6 +624,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
     initialCapital, leverage, orderPct, commission,
     takeProfitPct, stopLossPct, trailingStopPct,
     enableTrailing, enableDefense, indicator, direction,
+    filters: filters.length ? filters : undefined,
   };
 
   // ── Run backtest (instant) ──────────────────────────────────────────
@@ -868,6 +886,55 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
                   {d === 'both' ? '↕' : d === 'long_only' ? '↑ Long' : '↓ Short'}
                 </button>
               ))}
+            </div>
+          </section>
+
+          {/* Entry Filters (EA-style 1 entry + N filters AND) */}
+          <section>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>🧩 Entry Filters · AND</span>
+              <button
+                onClick={() => { setFilters(f => [...f, { id: `f${f.length}_${Date.now().toString().slice(-4)}`, indicator: 'adx', period: 14, op: '>', value: 25 }]); setActiveBotSkill(null); }}
+                style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid #6366f1', color: '#818cf8', borderRadius: 5, padding: '2px 8px', fontSize: '0.62rem', cursor: 'pointer', fontWeight: 700 }}>
+                + Add
+              </button>
+            </div>
+            {filters.length === 0 && (
+              <div style={{ fontSize: '0.62rem', color: '#475569', fontStyle: 'italic' }}>No filters — the entry signal fires alone. Add filters to gate entries (e.g. ADX&gt;25, price above SMA200).</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {filters.map((f, idx) => {
+                const meta = FILTER_META[f.indicator];
+                const update = (patch: Partial<FilterBlock>) => { setFilters(arr => arr.map((x, i) => i === idx ? { ...x, ...patch } : x)); setActiveBotSkill(null); };
+                const ops: FilterOp[] = meta.kind === 'ma' ? ['align', 'against'] : ['>', '<'];
+                return (
+                  <div key={f.id} style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 6, padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <select value={f.indicator} onChange={e => { const ni = e.target.value as FilterIndicator; const m = FILTER_META[ni]; update({ indicator: ni, period: m.defPeriod, op: m.kind === 'ma' ? 'align' : '>', value: m.defValue }); }}
+                        style={{ flex: 1, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 5px', color: '#e2e8f0', fontSize: '0.66rem' }}>
+                        {(Object.keys(FILTER_META) as FilterIndicator[]).map(k => <option key={k} value={k}>{FILTER_META[k].label}</option>)}
+                      </select>
+                      <button onClick={() => { setFilters(arr => arr.filter((_, i) => i !== idx)); setActiveBotSkill(null); }}
+                        style={{ background: 'transparent', border: '1px solid #7f1d1d', color: '#ef4444', borderRadius: 5, padding: '2px 7px', fontSize: '0.7rem', cursor: 'pointer' }}>✕</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {meta.hasPeriod && (
+                        <input type="number" value={f.period} title="Period" onChange={e => update({ period: Math.max(2, parseInt(e.target.value) || 2) })}
+                          style={{ width: 52, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 5px', color: '#e2e8f0', fontSize: '0.66rem' }} />
+                      )}
+                      <select value={f.op} onChange={e => update({ op: e.target.value as FilterOp })}
+                        style={{ flex: meta.kind === 'ma' ? 1 : 'none', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 5px', color: '#e2e8f0', fontSize: '0.66rem' }}>
+                        {ops.map(o => <option key={o} value={o}>{o === 'align' ? 'price aligned (trend)' : o === 'against' ? 'price against' : o}</option>)}
+                      </select>
+                      {meta.kind === 'osc' && (
+                        <input type="number" value={f.value ?? 0} title="Threshold" onChange={e => update({ value: parseFloat(e.target.value) || 0 })}
+                          style={{ width: 64, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 5, padding: '3px 5px', color: '#e2e8f0', fontSize: '0.66rem' }} />
+                      )}
+                      <span style={{ fontSize: '0.55rem', color: '#475569', flex: 1, textAlign: 'right' }}>{meta.hint}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 

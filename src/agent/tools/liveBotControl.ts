@@ -126,6 +126,7 @@ export const startAutoBot = new FunctionTool({
     const resolvedTF = timeframe || tfMap[skill.preferredTimeframe ?? ''] || '30m';
     const config = {
       botSkillName: skill.name, signal: skill.signal,
+      filters: skill.filters,
       direction: skill.direction,
       takeProfitPct: skill.takeProfitPct, stopLossPct: skill.stopLossPct,
       trailingStopPct: skill.trailingStopPct || 0,

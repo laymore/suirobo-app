@@ -28,6 +28,7 @@ export interface BacktestConfig {
   enableTrailing: boolean;
   enableDefense: boolean;
   indicator: IndicatorType;
+  filters?: FilterBlock[];   // EA-style AND-gates on top of the entry signal
   direction?: 'both' | 'long_only' | 'short_only'; // bộ lọc hướng
 
   // Supertrend EA inputs (ATR period + multiplier) — the standard tunables of
@@ -415,6 +416,156 @@ export function computeIndicators(data: Candle[], supertrendMult = 3, supertrend
   return { ema9, ema21, rsi, macdLine, signalLine, histogram, bbUpper, bbBasis, bbLower, superTrend, superTrendDir, donchianHigh, donchianLow };
 }
 
+// ─── Entry Filters (EA-style "1 entry + N filters" model) ─────────────────────
+// A bot's entry signal still fires the trade; each filter is an extra AND-gate
+// that must pass. Oscillator filters (rsi/adx/stoch/atr_pct/macd_hist) compare a
+// value vs a threshold (same gate for long & short). MA filters (sma/ema) are
+// trend-direction aware: `align` = price on the trade's side of the MA.
+
+export type FilterIndicator = 'rsi' | 'adx' | 'stoch' | 'macd_hist' | 'atr_pct' | 'sma' | 'ema';
+export type FilterOp = '>' | '<' | 'align' | 'against';
+
+export interface FilterBlock {
+  id: string;
+  indicator: FilterIndicator;
+  period: number;            // lookback (RSI 14, ADX 14, SMA 200, …)
+  op: FilterOp;              // >/< for oscillators; align/against for MAs
+  value?: number;            // threshold for >/< (e.g. ADX > 25, RSI < 70)
+}
+
+const seriesKey = (f: FilterBlock) => `${f.indicator}:${f.period}`;
+
+function smaSeries(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(0); let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += data[i].close;
+    if (i >= p) sum -= data[i - p].close;
+    out[i] = i >= p - 1 ? sum / p : data[i].close;
+  }
+  return out;
+}
+function emaSeriesF(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(0), k = 2 / (p + 1);
+  let e = data[0].close; out[0] = e;
+  for (let i = 1; i < n; i++) { e = data[i].close * k + e * (1 - k); out[i] = e; }
+  return out;
+}
+function rsiSeries(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(50);
+  let ag = 0, al = 0;
+  for (let i = 1; i <= p && i < n; i++) {
+    const d = data[i].close - data[i - 1].close;
+    if (d >= 0) ag += d; else al -= d;
+  }
+  ag /= p; al /= p;
+  if (p < n) out[p] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  for (let i = p + 1; i < n; i++) {
+    const d = data[i].close - data[i - 1].close;
+    ag = (ag * (p - 1) + (d > 0 ? d : 0)) / p;
+    al = (al * (p - 1) + (d < 0 ? -d : 0)) / p;
+    out[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+  return out;
+}
+function atrSeries(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(0); let atr = 0;
+  for (let i = 1; i < n; i++) {
+    const tr = Math.max(
+      data[i].high - data[i].low,
+      Math.abs(data[i].high - data[i - 1].close),
+      Math.abs(data[i].low - data[i - 1].close),
+    );
+    atr = i <= p ? (atr * (i - 1) + tr) / i : (atr * (p - 1) + tr) / p;
+    out[i] = atr;
+  }
+  return out;
+}
+function atrPctSeries(data: Candle[], p: number): number[] {
+  const atr = atrSeries(data, p);
+  return atr.map((a, i) => (data[i].close > 0 ? (a / data[i].close) * 100 : 0));
+}
+function stochSeries(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(50);
+  for (let i = p - 1; i < n; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - p + 1; j <= i; j++) { if (data[j].high > hi) hi = data[j].high; if (data[j].low < lo) lo = data[j].low; }
+    out[i] = hi === lo ? 50 : ((data[i].close - lo) / (hi - lo)) * 100;
+  }
+  return out;
+}
+function adxSeries(data: Candle[], p: number): number[] {
+  const n = data.length, out = new Array(n).fill(0);
+  if (n < p + 2) return out;
+  let tr14 = 0, pdm14 = 0, ndm14 = 0;
+  for (let i = 1; i <= p; i++) {
+    const up = data[i].high - data[i - 1].high, dn = data[i - 1].low - data[i].low;
+    pdm14 += up > dn && up > 0 ? up : 0;
+    ndm14 += dn > up && dn > 0 ? dn : 0;
+    tr14 += Math.max(data[i].high - data[i].low, Math.abs(data[i].high - data[i - 1].close), Math.abs(data[i].low - data[i - 1].close));
+  }
+  let adx = 0, dxSum = 0, count = 0;
+  for (let i = p + 1; i < n; i++) {
+    const up = data[i].high - data[i - 1].high, dn = data[i - 1].low - data[i].low;
+    const pdm = up > dn && up > 0 ? up : 0, ndm = dn > up && dn > 0 ? dn : 0;
+    const tr = Math.max(data[i].high - data[i].low, Math.abs(data[i].high - data[i - 1].close), Math.abs(data[i].low - data[i - 1].close));
+    tr14 = tr14 - tr14 / p + tr;
+    pdm14 = pdm14 - pdm14 / p + pdm;
+    ndm14 = ndm14 - ndm14 / p + ndm;
+    const pdi = tr14 ? (pdm14 / tr14) * 100 : 0, ndi = tr14 ? (ndm14 / tr14) * 100 : 0;
+    const dx = pdi + ndi ? (Math.abs(pdi - ndi) / (pdi + ndi)) * 100 : 0;
+    if (count < p) { dxSum += dx; adx = dxSum / (count + 1); }
+    else adx = (adx * (p - 1) + dx) / p;
+    count++; out[i] = adx;
+  }
+  return out;
+}
+
+export function computeFilterSeries(data: Candle[], filters?: FilterBlock[]): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const f of filters ?? []) {
+    const key = seriesKey(f);
+    if (out[key]) continue;
+    const p = Math.max(2, Math.round(f.period || 14));
+    switch (f.indicator) {
+      case 'sma':       out[key] = smaSeries(data, p); break;
+      case 'ema':       out[key] = emaSeriesF(data, p); break;
+      case 'rsi':       out[key] = rsiSeries(data, p); break;
+      case 'stoch':     out[key] = stochSeries(data, p); break;
+      case 'adx':       out[key] = adxSeries(data, p); break;
+      case 'atr_pct':   out[key] = atrPctSeries(data, p); break;
+      case 'macd_hist': out[key] = computeIndicators(data).histogram; break;
+    }
+  }
+  return out;
+}
+
+/** All filters must pass for the bar `i` and trade `side`. */
+export function passesFilters(
+  series: Record<string, number[]>,
+  data: Candle[],
+  i: number,
+  filters: FilterBlock[] | undefined,
+  side: 'LONG' | 'SHORT',
+): boolean {
+  if (!filters?.length) return true;
+  for (const f of filters) {
+    const s = series[seriesKey(f)];
+    if (!s) continue;                 // unknown/uncomputed → don't block
+    const v = s[i];
+    if (f.indicator === 'sma' || f.indicator === 'ema') {
+      const above = data[i].close > v;
+      const want  = f.op === 'against' ? !(side === 'LONG' ? above : !above)
+                                       : (side === 'LONG' ? above : !above);
+      if (!want) return false;
+    } else {
+      const thr = f.value ?? 0;
+      if (f.op === '>' && !(v > thr)) return false;
+      if (f.op === '<' && !(v < thr)) return false;
+    }
+  }
+  return true;
+}
+
 // ─── Signal Detection ─────────────────────────────────────────────────────────
 
 function getSignal(i: number, data: Candle[], ind: Indicators, indicator: IndicatorType) {
@@ -562,6 +713,7 @@ function computeStats(
 export function runBacktest(data: Candle[], cfg: BacktestConfig): BacktestResult {
   const t0 = performance.now();
   const indicators = computeIndicators(data, cfg.supertrendMult ?? 3, cfg.supertrendPeriod ?? 10, cfg.breakoutPeriod ?? 20);
+  const filterSeries = computeFilterSeries(data, cfg.filters);
   // MTF filter: direction of the last CLOSED HTF Supertrend per base bar
   const htfDir = cfg.htfMinutes
     ? computeHtfTrendDirs(data, cfg.htfMinutes, cfg.htfSupertrendPeriod ?? 10, cfg.htfSupertrendMult ?? 3)
@@ -683,6 +835,9 @@ export function runBacktest(data: Candle[], cfg: BacktestConfig): BacktestResult
         else if (htfDir[i] === -1) buy = false;
         else { buy = false; sell = false; }
       }
+      // EA-style indicator filters (AND): every filter must pass for the side.
+      if (buy  && !passesFilters(filterSeries, data, i, cfg.filters, 'LONG'))  buy  = false;
+      if (sell && !passesFilters(filterSeries, data, i, cfg.filters, 'SHORT')) sell = false;
 
       if (buy || sell) {
         const type    = buy ? 'LONG' : 'SHORT';
@@ -771,6 +926,7 @@ export function detectLiveSignal(
   opts?: {
     supertrendMult?: number; supertrendPeriod?: number; breakoutPeriod?: number;
     htfMinutes?: number; htfSupertrendPeriod?: number; htfSupertrendMult?: number;
+    filters?: FilterBlock[];
   },
 ): {
   buy: boolean;
@@ -798,6 +954,12 @@ export function detectLiveSignal(
     if (d === 1)       sell = false;
     else if (d === -1) buy = false;
     else { buy = false; sell = false; }
+  }
+  // EA-style indicator filters (AND) — same gate as the backtester.
+  if (opts?.filters?.length) {
+    const fs = computeFilterSeries(candles, opts.filters);
+    if (buy  && !passesFilters(fs, candles, n - 1, opts.filters, 'LONG'))  buy  = false;
+    if (sell && !passesFilters(fs, candles, n - 1, opts.filters, 'SHORT')) sell = false;
   }
 
   return {
@@ -829,6 +991,7 @@ export function configFromBotSkill(
     orderPct: number;
     commission: number;
     direction: 'both' | 'long_only' | 'short_only';
+    filters?: FilterBlock[];
     // Supertrend EA inputs (optional)
     supertrendPeriod?: number;
     supertrendMult?: number;
@@ -861,6 +1024,7 @@ export function configFromBotSkill(
     enableTrailing:  skill.enableTrailing,
     enableDefense:   skill.enableDefense,
     indicator:       skill.signal,
+    filters:         skill.filters,
     direction:       skill.direction,
     supertrendPeriod: skill.supertrendPeriod,
     supertrendMult:   skill.supertrendMult,

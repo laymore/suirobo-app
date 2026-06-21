@@ -5,7 +5,8 @@
  *  - local_agent (ADK FunctionTool runtime)
  */
 
-import type { IndicatorType } from '../agent/backtestEngine';
+import type { IndicatorType, FilterBlock } from '../agent/backtestEngine';
+export type { FilterBlock } from '../agent/backtestEngine';
 
 export interface BotSkillConfig {
   // ── Metadata ──
@@ -16,6 +17,8 @@ export interface BotSkillConfig {
 
   // ── Entry Signal ──
   signal: IndicatorType;
+  // EA-style extra AND-filters layered on top of the entry signal (optional).
+  filters?: FilterBlock[];
   // Supertrend EA inputs (used by 'supertrend' / 'supertrend_flip' signals)
   supertrendPeriod?: number;  // ATR period, default 10
   supertrendMult?: number;    // ATR multiplier, default 3
