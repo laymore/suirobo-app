@@ -99,3 +99,7 @@ server/check-*.ts
 
 # Claude Code local skills/config — keep on machine only
 .claude/
+
+# Authorship watermark — local only (fingerprint lives in .env VITE_FP)
+src/signature.ts
+NOTICE

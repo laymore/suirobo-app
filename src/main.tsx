@@ -1,8 +1,3 @@
-/*
- * Suirobo — © 2026 Autobots Team. All rights reserved.
- * autobots.wal.app · github.com/laymore/suirobo-app
- * Authorship watermark in ./signature.ts — do not remove.
- */
 import { Buffer } from 'buffer'
 globalThis.Buffer = globalThis.Buffer || Buffer
 
@@ -14,9 +9,10 @@ import '@mysten/dapp-kit/dist/index.css'
 
 import './index.css'
 import App from './App.tsx'
-import { printSignature } from './signature'
 
-printSignature()
+// Build fingerprint — value injected at build time (empty in clean checkouts).
+const __fp = import.meta.env.VITE_FP as string | undefined
+if (__fp) { try { console.log('%cSuirobo', 'color:#4da2ff;font-weight:700', __fp) } catch { /* noop */ } }
 
 const queryClient = new QueryClient()
 
