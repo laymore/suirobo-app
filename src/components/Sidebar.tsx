@@ -4,6 +4,7 @@ import { AgentDownloadModal } from './AgentDownloadModal';
 import { LogoLockup } from './Logo';
 import { AGENT_CERT_ACCEPT_URL } from '../agent/agentUrl';
 import { useI18n } from '../i18n';
+import { IS_DESKTOP } from '../platform';
 
 const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
 
@@ -57,7 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // via the Live Trade "Trading Mode" switch (Manual rung / AI Agent rung). The
   // AI chat also stays reachable through the Chat History section below.
   // Desktop app trims to Trade + Backtest + Factory (My Bot) — no Home/marketing.
-  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+  const isDesktop = IS_DESKTOP;
   const allMenuItems: { id: ViewType; icon: string; label: string }[] = [
     { id: 'dashboard', icon: '⌂', label: t('sidebar.nav.dashboard') },
     { id: 'livetrade', icon: '⚡', label: t('sidebar.nav.livetrade') },

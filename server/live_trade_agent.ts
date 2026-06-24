@@ -253,9 +253,9 @@ function addLog(type: TradeLog['type'], msg: string, price?: number, pnl?: numbe
 
 // ─── WebSocket ─────────────────────────────────────────────────────────────────
 
-// ws://localhost:8080 cho dev (HTTP web)
-const wss = new WebSocketServer({ port: 8080 });
-console.log('🔌 LiveBot WebSocket (ws)  on ws://localhost:8080  (dev)');
+// ws://127.0.0.1:8080 cho dev (HTTP web) — loopback only
+const wss = new WebSocketServer({ port: 8080, host: '127.0.0.1' });
+console.log('🔌 LiveBot WebSocket (ws)  on ws://127.0.0.1:8080  (dev)');
 
 // wss://localhost:8081 cho Walrus HTTPS web — sync vì pkg không support dynamic import
 (() => {
@@ -273,7 +273,7 @@ console.log('🔌 LiveBot WebSocket (ws)  on ws://localhost:8080  (dev)');
       });
       const wssSecure = new WebSocketServer({ server: httpsServer });
       wssSecure.on('connection', (...args: any[]) => (wss as any).emit('connection', ...args));
-      httpsServer.listen(8081, () => {
+      httpsServer.listen(8081, '127.0.0.1', () => {
         console.log('🔒 LiveBot WebSocket (wss) on wss://localhost:8081 (HTTPS)');
       });
       return true;

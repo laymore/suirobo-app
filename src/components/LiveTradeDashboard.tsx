@@ -9,6 +9,21 @@ import { useSignAndExecuteTransaction, useCurrentAccount, useSuiClient } from '@
 import { Transaction } from '@mysten/sui/transactions';
 import { DeepBookClient } from '@mysten/deepbook-v3';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { IS_DESKTOP } from '../platform';
+
+// Native OS notification for bot trade events — works natively in the Electron
+// desktop app; on the web it asks for permission once. Silent no-op if blocked.
+let __notifyAsked = false;
+function notify(title: string, body: string) {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') { new Notification(title, { body }); return; }
+    if (Notification.permission !== 'denied' && !__notifyAsked) {
+      __notifyAsked = true;
+      Notification.requestPermission().then(p => { if (p === 'granted') new Notification(title, { body }); }).catch(() => {});
+    }
+  } catch { /* no-op */ }
+}
 
 /** Pick the wallet's margin manager that belongs to the SUI/USDC pool.
  *  A wallet can own managers from multiple pools — using the wrong one
@@ -431,7 +446,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   // ── Auto Bot (Direct) config ──
   // Private key now lives in userConfig (entered once in SetupWizard step 4).
   // We DON'T re-collect it here — Live Trade only checks status and reads it on Start.
-  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+  const isDesktop = IS_DESKTOP;
   const wizardHasKey = userConfig.config.hasPrivateKey;
   // Legacy local state — kept ONLY because the dev-wallet (.env) path still writes
   // through it. Manual-key entry path is removed and these stay default.
@@ -566,9 +581,16 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
           if (autoConfirm) { handleConfirmTx(msg.pendingTx, msg.intent); return; }
           setPendingTx(msg.pendingTx); setPendingIntent(msg.intent || 'open');
         }
-        if (msg.type === 'TRADE_CLOSED' || msg.type === 'TRADE_OPENED') {
-          setBotState(prev => ({ ...prev, position: msg.type === 'TRADE_CLOSED' ? null : prev.position }));
-          refreshChartData(); // pull new markers + history row immediately
+        if (msg.type === 'TRADE_OPENED') {
+          setBotState(prev => ({ ...prev, position: prev.position }));
+          notify('🟢 Position opened', `${msg.position?.type ?? ''} @ $${msg.position?.entryPrice ?? ''}`.trim());
+          refreshChartData();
+        }
+        if (msg.type === 'TRADE_CLOSED') {
+          setBotState(prev => ({ ...prev, position: null }));
+          const pnl = msg.pnlApprox;
+          notify('🔴 Position closed', `${msg.reason ?? ''} · Est. PnL ${pnl >= 0 ? '+' : ''}${pnl ?? ''} (${msg.pnlPct ?? 0}%)`);
+          refreshChartData();
         }
       } catch { /* ignore */ }
     };
@@ -1851,36 +1873,6 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
       </div>
 
       {/* ═══════════════════════ PENDING TX MODAL (AI Mode — removed) ═══════════════════════ */}
-      {false && pendingTx && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0a0f1d', border: '1px solid #334155', borderRadius: 16, padding: 28, maxWidth: 420, width: '90%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <span style={{ fontSize: '1.5rem' }}>{pendingIntent === 'open' ? '📈' : '📉'}</span>
-              <div>
-                <div style={{ fontWeight: 800, color: '#e2e8f0', fontSize: '0.95rem' }}>
-                  {pendingIntent === 'open' ? 'Confirm Open Position' : 'Confirm Close Position'}
-                </div>
-                <div style={{ fontSize: '0.7rem', color: '#475569' }}>AI Bot emitted a signal — sign to execute</div>
-              </div>
-            </div>
-            <div style={{ background: '#080d1a', borderRadius: 8, padding: '12px 14px', marginBottom: 16, fontSize: '0.72rem', color: '#64748b', lineHeight: 1.8 }}>
-              <div>💲 Execution fee: <strong style={{ color: '#f59e0b' }}>0.05 SUI</strong></div>
-              <div>🌐 Network: <strong style={{ color: '#22c55e' }}>Sui Mainnet</strong></div>
-              <div>🤖 Skill: <strong style={{ color: '#818cf8' }}>{s.config?.botSkillName}</strong></div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => handleConfirmTx(pendingTx, pendingIntent)} style={{
-                flex: 2, padding: '11px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', fontWeight: 800, fontSize: '0.88rem',
-              }}>✅ Sign & Execute</button>
-              <button onClick={() => { setPendingTx(null); wsRef.current?.send(JSON.stringify({ type: 'TX_RESULT', success: false, error: 'User rejected', intent: pendingIntent })); }}
-                style={{ flex: 1, padding: '11px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#64748b', cursor: 'pointer' }}>
-                Reject
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

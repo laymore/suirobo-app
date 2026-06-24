@@ -13,6 +13,7 @@ import { ConnectButton, useCurrentAccount } from '@mysten/dapp-kit';
 import type { UserConfigReturn } from '../hooks/useUserConfig';
 import { AGENT_URL } from '../agent/agentUrl';
 import { useI18n } from '../i18n';
+import { IS_DESKTOP } from '../platform';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -375,7 +376,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
 
   // Desktop app: no browser wallet — the key is persisted in the app install dir
   // and the bundled agent uses it to derive the address + sign. Step 3 is skipped.
-  const isDesktop = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
+  const isDesktop = IS_DESKTOP;
 
   const handleLoadPk = async () => {
     if (!pk.trim()) return;

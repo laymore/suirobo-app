@@ -7,7 +7,20 @@ import { predictTools } from '../src/agent/tools/predict.js';
 import { MemWal } from '@mysten-incubation/memwal';
 
 const app = express();
-app.use(cors());
+
+// ── Hardening: only allow trusted origins to reach the local agent ──
+// The agent runs on the user's machine and signs real trades. Any web page can
+// otherwise fetch http://localhost:3001 (CORS was open + bound to 0.0.0.0). Allow
+// only localhost, the Walrus portal domains, and no-origin (same-origin / curl /
+// desktop file://). A named malicious domain (incl. DNS-rebinding) is rejected.
+const originAllowed = (origin?: string): boolean => {
+  if (!origin || origin === 'null') return true;
+  try {
+    const h = new URL(origin).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.wal.app') || h.endsWith('.walrus.site');
+  } catch { return false; }
+};
+app.use(cors({ origin: (o, cb) => cb(null, originAllowed(o)) }));
 app.use(express.json());
 
 const globalSessionService = new InMemorySessionService();
@@ -321,6 +334,9 @@ app.post('/api/dashboard', async (req, res) => {
 });
 
 const PORT = 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Suirobo Agent Server running on http://localhost:${PORT}`);
+// Bind to loopback only — the agent must never be reachable from other machines
+// on the LAN. localhost/127.0.0.1 callers (desktop + the local cert-https proxy)
+// still work.
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`🚀 Suirobo Agent Server running on http://127.0.0.1:${PORT}`);
 });

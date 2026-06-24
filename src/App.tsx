@@ -15,12 +15,9 @@ import DevMarginTest from './components/DevMarginTest';
 import type { BotSkillConfig } from './types/botSkill';
 import { useUserConfig } from './hooks/useUserConfig';
 import { useI18n } from './i18n';
+import { IS_DESKTOP } from './platform';
 
 import './App.css';
-
-// Desktop (Electron) build flag — set by the preload. Trims the UI to the
-// agent-signed Client Bot + Backtest; no browser-wallet tiers (Manual/Web/AI).
-const IS_DESKTOP = typeof window !== 'undefined' && (window as any).SUIROBO_DESKTOP === true;
 
 export default function App() {
   // Desktop app opens straight to Live Trade (Home is hidden in the trimmed build).

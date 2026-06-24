@@ -384,6 +384,56 @@ function drawChart(
 
 // ─── Stats Card ───────────────────────────────────────────────────────────────
 
+// Equity curve + drawdown shading — the headline MT5-style report visual.
+// Data (equityByIndex per candle, net of fees+slippage) is precomputed by the engine.
+const EquityCurve: React.FC<{ equity: number[]; initialCapital: number; maxDdPct: number }> =
+  ({ equity, initialCapital, maxDdPct }) => {
+    const ref = useRef<HTMLCanvasElement>(null);
+    useEffect(() => {
+      const cv = ref.current;
+      if (!cv || equity.length < 2) return;
+      const dpr = window.devicePixelRatio || 1;
+      const W = cv.clientWidth || 600, H = cv.clientHeight || 110;
+      cv.width = W * dpr; cv.height = H * dpr;
+      const ctx = cv.getContext('2d'); if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const lo = Math.min(initialCapital, ...equity), hi = Math.max(initialCapital, ...equity);
+      const pad = 8, span = (hi - lo) || 1;
+      const X = (i: number) => pad + (i / (equity.length - 1)) * (W - 2 * pad);
+      const Y = (v: number) => H - pad - ((v - lo) / span) * (H - 2 * pad);
+      // baseline at starting capital
+      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(pad, Y(initialCapital)); ctx.lineTo(W - pad, Y(initialCapital)); ctx.stroke();
+      ctx.setLineDash([]);
+      // running peak → drawdown region (shaded red where equity < peak)
+      const peaks: number[] = []; let pk = equity[0];
+      for (const e of equity) { pk = Math.max(pk, e); peaks.push(pk); }
+      ctx.fillStyle = 'rgba(239,68,68,0.12)';
+      ctx.beginPath(); ctx.moveTo(X(0), Y(equity[0]));
+      for (let i = 1; i < equity.length; i++) ctx.lineTo(X(i), Y(equity[i]));
+      for (let i = equity.length - 1; i >= 0; i--) ctx.lineTo(X(i), Y(peaks[i]));
+      ctx.closePath(); ctx.fill();
+      // equity line (green if ending above start, else red)
+      const up = equity[equity.length - 1] >= initialCapital;
+      ctx.strokeStyle = up ? '#10b981' : '#ef4444'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(X(0), Y(equity[0]));
+      for (let i = 1; i < equity.length; i++) ctx.lineTo(X(i), Y(equity[i]));
+      ctx.stroke();
+    }, [equity, initialCapital]);
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>📈 Equity Curve</span>
+          <span style={{ fontSize: '0.6rem', color: '#ef4444' }}>max drawdown {maxDdPct}%</span>
+        </div>
+        <div style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 8, padding: 4 }}>
+          <canvas ref={ref} style={{ width: '100%', height: 110, display: 'block' }} />
+        </div>
+      </div>
+    );
+  };
+
 const StatCard: React.FC<{ label: string; value: string | number; sub?: string; color?: string }> =
   ({ label, value, sub, color = '#e2e8f0' }) => (
     <div style={{
@@ -1190,6 +1240,12 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
           {/* ── STATS GRID (MT5-style) ── */}
           {result && s && (
             <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b' }}>
+              {/* Equity curve + drawdown */}
+              {result.equityByIndex && result.equityByIndex.length > 1 && (
+                <div style={{ marginBottom: 12 }}>
+                  <EquityCurve equity={result.equityByIndex} initialCapital={initialCapital} maxDdPct={s.maxDrawdownPct} />
+                </div>
+              )}
               {/* Row 1: Performance */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 8 }}>
                 <StatCard label="Net Profit" color={s.netProfitVal >= 0 ? '#10b981' : '#ef4444'}

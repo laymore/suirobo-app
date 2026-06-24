@@ -71,9 +71,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── CORS — cho phép mọi origin (Walrus deploy, localhost dev, ...) ──────────
+// ── CORS — only trusted origins (the agent signs real trades on this machine) ──
+// Allow localhost (desktop + dev), the Walrus portal domains (the deployed web
+// app talks to the user's local agent), and no-origin (same-origin / curl /
+// desktop file://). A named malicious domain — incl. DNS-rebinding — is rejected.
+const originAllowed = (origin?: string): boolean => {
+  if (!origin || origin === 'null') return true;
+  try {
+    const h = new URL(origin).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.wal.app') || h.endsWith('.walrus.site');
+  } catch { return false; }
+};
 app.use(cors({
-  origin: true,
+  origin: (o, cb) => cb(null, originAllowed(o)),
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Wallet-Address'],
@@ -1343,9 +1353,9 @@ const PORT      = 3001;
 const HTTPS_PORT= 3002;
 const CERT_DIR  = path.join(DATA_ROOT, 'certs');
 
-// HTTP server
-app.listen(PORT, () => {
-  console.log(`🚀 Suirobo Agent (HTTP)  on http://localhost:${PORT}  (dev mode)`);
+// HTTP server — loopback only (never reachable from other machines on the LAN)
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`🚀 Suirobo Agent (HTTP)  on http://127.0.0.1:${PORT}  (dev mode)`);
 });
 
 // HTTPS server — generate self-signed cert nếu chưa có
@@ -1385,7 +1395,7 @@ async function startHttps() {
       console.log(`   ✓ Cert: ${certPath}`);
     }
 
-    https.createServer({ cert, key }, app).listen(HTTPS_PORT, () => {
+    https.createServer({ cert, key }, app).listen(HTTPS_PORT, '127.0.0.1', () => {
       console.log(`🔒 Suirobo Agent (HTTPS) on https://localhost:${HTTPS_PORT} (Walrus web)`);
       console.log(`   ⚠️  First run: open https://localhost:${HTTPS_PORT}/health → click "Advanced" → "Proceed"`);
     });

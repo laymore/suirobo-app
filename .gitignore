@@ -103,3 +103,6 @@ server/check-*.ts
 # Authorship watermark — local only (fingerprint lives in .env VITE_FP)
 src/signature.ts
 NOTICE
+
+# Internal roadmap — local only (reveals strategy + open security gaps)
+DESKTOP_ROADMAP.md
