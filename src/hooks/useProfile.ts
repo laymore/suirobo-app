@@ -33,8 +33,11 @@ export const AVATAR_LIST = AVATAR_OPTIONS;
 
 const profileKey = (address: string) => `suirobo_profile_${address.slice(0, 20)}`;
 
-const SERVICE_ACCOUNT_ID = '0x4e0943960eb0a40d951f51f8f54f7a67bc787828b0331a6db2014f45dcb667ed';
-const SERVICE_PRIVATE_KEY = '7db5fa15773a46e857e4661bc189372f20bf0266155df2f56402999c0d073fa7';
+// MemWal relayer credentials — read from a local-only .env (never hard-code).
+// When absent, profiles stay local-only (no Walrus sync).
+const SERVICE_ACCOUNT_ID = import.meta.env.VITE_MEMWAL_ACCT as string | undefined;
+const SERVICE_PRIVATE_KEY = import.meta.env.VITE_MEMWAL_KEY as string | undefined;
+const MEMWAL_ENABLED = !!(SERVICE_ACCOUNT_ID && SERVICE_PRIVATE_KEY);
 const RELAYER_URL = 'https://relayer.memwal.ai';
 
 export function useProfile(walletAddress?: string) {
@@ -79,11 +82,12 @@ export function useProfile(walletAddress?: string) {
   }, [walletAddress]);
 
   const syncFromWalrus = async (address: string): Promise<boolean> => {
+    if (!MEMWAL_ENABLED) return false; // no relayer creds → local-only
     try {
       const res = await fetch(`${RELAYER_URL}/list?t=${Date.now()}`, {
         headers: {
-          'X-Account-Id': SERVICE_ACCOUNT_ID,
-          'X-Private-Key': SERVICE_PRIVATE_KEY,
+          'X-Account-Id': SERVICE_ACCOUNT_ID!,
+          'X-Private-Key': SERVICE_PRIVATE_KEY!,
           'X-Wallet-Namespace': address,
           'X-Data-Type': 'profile',
         },
@@ -136,14 +140,15 @@ export function useProfile(walletAddress?: string) {
     setProfile(newProfile);
     setIsFirstTime(false);
 
-    // Sync Walrus nền
+    // Sync Walrus nền (bỏ qua nếu không có relayer creds)
+    if (!MEMWAL_ENABLED) { setIsSaving(false); return newProfile; }
     try {
       await fetch(`${RELAYER_URL}/store`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Account-Id': SERVICE_ACCOUNT_ID,
-          'X-Private-Key': SERVICE_PRIVATE_KEY,
+          'X-Account-Id': SERVICE_ACCOUNT_ID!,
+          'X-Private-Key': SERVICE_PRIVATE_KEY!,
           'X-Wallet-Namespace': walletAddress,
           'X-Data-Type': 'profile',
         },
