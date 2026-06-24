@@ -426,7 +426,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
           </p>
         </div>
 
-        <StepDots current={isDesktop && step === 4 ? 3 : step} total={isDesktop ? 3 : 4} />
+        <StepDots current={isDesktop && step === 4 ? 2 : step} total={isDesktop ? 2 : 4} />
 
         {/* ══════════════ STEP 1 — LOCAL AGENT ══════════════ */}
         {step === 1 && (
@@ -492,11 +492,11 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
 
             <div style={{ display: 'flex', gap: 8 }}>
               {agentOnline === false && (
-                <button onClick={() => setStep(2)} style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>
+                <button onClick={() => setStep(isDesktop ? 4 : 2)} style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>
                   {t('setup.skipForNow')}
                 </button>
               )}
-              <button onClick={() => setStep(2)} disabled={!agentOnline && agentOnline !== false}
+              <button onClick={() => setStep(isDesktop ? 4 : 2)} disabled={!agentOnline && agentOnline !== false}
                 style={{
                   flex: 2, padding: '11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
                   background: agentOnline ? 'linear-gradient(135deg,#10b981,#059669)' : '#1e293b',
@@ -676,14 +676,22 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
         {step === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>{isDesktop ? '3' : '4'}</div>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>{isDesktop ? '2' : '4'}</div>
               <div>
                 <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '0.88rem' }}>{isDesktop ? 'Wallet Key' : 'Auto Bot'} <span style={{ fontSize: '0.65rem', color: '#475569', fontWeight: 400 }}>{isDesktop ? '' : '(Optional)'}</span></div>
                 <div style={{ fontSize: '0.68rem', color: '#475569' }}>{isDesktop ? 'The app stores your key and uses it to connect the wallet + sign trades' : 'Allow the bot to auto-sign orders without prompts'}</div>
               </div>
             </div>
 
-            {/* Mode comparison */}
+            {/* How it works — desktop is pure deterministic bot (no AI). */}
+            {isDesktop ? (
+              <div style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.18)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#f87171', marginBottom: 6 }}>⚡ Auto Bot — runs your EA fully automatically</div>
+                {['No AI / no API key — signals come from your strategy (indicators + filters)', 'No browser wallet — the app signs trades with this key', '100% automatic, 24/7'].map(t => (
+                  <div key={t} style={{ fontSize: '0.66rem', color: '#94a3b8', marginBottom: 3 }}>✓ {t}</div>
+                ))}
+              </div>
+            ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div style={{ background: 'rgba(77,162,255,0.04)', border: '1px solid rgba(77,162,255,0.15)', borderRadius: 8, padding: 10 }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#00d4ff', marginBottom: 6 }}>🤖 AI Auto Bot</div>
@@ -700,6 +708,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
                 <div style={{ marginTop: 6, fontSize: '0.62rem', background: 'rgba(239,68,68,0.08)', borderRadius: 4, padding: '3px 6px', color: '#f87171', display: 'inline-block' }}>Private Key required</div>
               </div>
             </div>
+            )}
 
             {/* Private key */}
             <div>
@@ -756,7 +765,7 @@ export const SetupWizard: React.FC<Props> = ({ userConfig, onComplete }) => {
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStep(isDesktop ? 2 : 3)} style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #1e293b', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>← Back</button>
+              <button onClick={() => setStep(isDesktop ? 1 : 3)} style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #1e293b', background: 'transparent', color: '#475569', fontSize: '0.78rem', cursor: 'pointer' }}>← Back</button>
               <button onClick={handleFinish}
                 style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', color: '#fff', background: 'linear-gradient(135deg,#10b981,#059669)' }}>
                 {pkLoaded ? '⚡ Finish & Open App →' : '🤖 Skip & Open App →'}
