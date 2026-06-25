@@ -15,6 +15,7 @@ import type { IndicatorType } from '../agent/backtestEngine';
 import { AGENT_URL } from '../agent/agentUrl';
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
+import { IS_DESKTOP } from '../platform';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -233,13 +234,17 @@ const SkillCard: React.FC<{
         }}>
           ⚡ Backtest
         </button>
-        <button onClick={onPublish} disabled={isPublishing} style={{
-          flex: 1, padding: '8px', borderRadius: 7, border: 'none', cursor: 'pointer',
-          background: 'linear-gradient(135deg, #10b981, #059669)',
-          color: '#fff', fontWeight: 700, fontSize: '0.75rem',
-        }}>
-          {isPublishing ? '⏳ Publishing...' : '🚀 Publish'}
-        </button>
+        {/* Publishing to the on-chain marketplace needs a browser wallet to sign —
+            not available on desktop (agent-signed, key-local). Hide it there. */}
+        {!IS_DESKTOP && (
+          <button onClick={onPublish} disabled={isPublishing} style={{
+            flex: 1, padding: '8px', borderRadius: 7, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(135deg, #10b981, #059669)',
+            color: '#fff', fontWeight: 700, fontSize: '0.75rem',
+          }}>
+            {isPublishing ? '⏳ Publishing...' : '🚀 Publish'}
+          </button>
+        )}
       </div>
     </div>
   );

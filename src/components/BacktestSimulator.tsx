@@ -17,6 +17,7 @@ import {
 } from '../types/botSkill';
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { AGENT_URL } from '../agent/agentUrl';
+import OptimizerPanel from './OptimizerPanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -736,6 +737,23 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
     }, 10);
   }, [filteredData, cfg, activeBotSkill, dirty]);
 
+  // ── Optimizer ──────────────────────────────────────────────────────
+  const [showOptimizer, setShowOptimizer] = useState(false);
+  // Load a winning parameter set from the optimizer back into the Tester form.
+  const applyOptParams = useCallback((patch: Record<string, number>) => {
+    const S: Record<string, (n: number) => void> = {
+      emaFast: setEmaFast, emaSlow: setEmaSlow, maFast: setMaFast, maSlow: setMaSlow,
+      rsiPeriod: setRsiPeriod, rsiOversold: setRsiOversold, rsiOverbought: setRsiOverbought,
+      bbPeriod: setBbPeriod, bbStdDev: setBbStdDev,
+      supertrendPeriod: setStPeriod, supertrendMult: setStMult, breakoutPeriod: setBkPeriod,
+      takeProfitPct: setTakeProfitPct, stopLossPct: setStopLossPct,
+      leverage: setLeverage, trailingStopPct: setTrailingStopPct,
+    };
+    for (const k in patch) S[k]?.(patch[k]);
+    setActiveBotSkill(null);
+    setDirty(true);
+  }, []);
+
   // ── Draw chart ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!result || !canvasRef.current || filteredData.length === 0) return;
@@ -1138,6 +1156,20 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
             {isLoading ? '⏳ Loading...' : isRunning ? '⚙️ Computing...' : '⚡ RUN BACKTEST'}
           </button>
 
+          {/* Optimizer — MT5-style parameter sweep */}
+          <button
+            onClick={() => setShowOptimizer(true)}
+            disabled={isLoading || filteredData.length < 35}
+            title={filteredData.length < 35 ? 'Load data first' : 'Sweep parameters to find the best settings'}
+            style={{
+              padding: '9px', borderRadius: 8, cursor: filteredData.length < 35 ? 'not-allowed' : 'pointer',
+              background: 'rgba(0,212,255,0.08)', border: '1px solid #00d4ff', color: '#00d4ff',
+              fontWeight: 700, fontSize: '0.8rem',
+            }}
+          >
+            🔬 OPTIMIZE — find best parameters
+          </button>
+
           {/* Save the tested config as a local bot → My Bot */}
           <button
             onClick={handleSaveAsBot}
@@ -1348,6 +1380,15 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
           )}
         </div>
       </div>
+
+      {showOptimizer && (
+        <OptimizerPanel
+          baseCfg={cfg}
+          data={filteredData}
+          onApply={applyOptParams}
+          onClose={() => setShowOptimizer(false)}
+        />
+      )}
     </div>
   );
 };
