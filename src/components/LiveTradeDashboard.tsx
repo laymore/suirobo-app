@@ -16,6 +16,7 @@ import { IS_DESKTOP } from '../platform';
 let __notifyAsked = false;
 function notify(title: string, body: string) {
   try {
+    if (!getNotifyEnabled()) return;            // user turned trade alerts off in Settings
     if (typeof Notification === 'undefined') return;
     if (Notification.permission === 'granted') { new Notification(title, { body }); return; }
     if (Notification.permission !== 'denied' && !__notifyAsked) {
@@ -57,6 +58,7 @@ import { AGENT_URL, AGENT_WS_URL } from '../agent/agentUrl';
 import { useUserConfig } from '../hooks/useUserConfig';
 import { usePythOracle } from '../hooks/usePythOracle';
 import { getMarginManagerDetail, pickBestSuiUsdcManager } from '../utils/marginDetail';
+import { getNotifyEnabled } from '../prefs';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 

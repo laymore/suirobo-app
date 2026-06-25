@@ -7,8 +7,10 @@ import { DashboardView } from './components/views/DashboardView';
 import { AgentView } from './components/views/AgentView';
 import { FactoryView } from './components/views/FactoryView';
 import { ManualTradeView } from './components/views/ManualTradeView';
+import { PreferencesView } from './components/views/PreferencesView';
 import { BacktestSimulator } from './components/BacktestSimulator';
 import { LiveTradeDashboard } from './components/LiveTradeDashboard';
+import { AccountStrip } from './components/AccountStrip';
 import { WebBotPanel } from './components/WebBotPanel';
 import { SetupWizard } from './components/SetupWizard';
 import DevMarginTest from './components/DevMarginTest';
@@ -146,7 +148,11 @@ export default function App() {
         position: 'sticky', top: 0, zIndex: 100,
       }}>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 16 }}>
-          {account && (
+          {/* Desktop: rich read-only account strip (wallet + margin) sourced from the
+              agent's local wallet. Web: the simple connected-wallet chip below. */}
+          {IS_DESKTOP ? (
+            <AccountStrip />
+          ) : account && (
             <div style={{
               background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8,
               padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 12,
@@ -382,6 +388,13 @@ export default function App() {
                 />
               )}
             </div>
+          )}
+          {currentView === 'preferences' && (
+            <PreferencesView
+              agentOnline={userConfig.agentOnline}
+              onRecheckAgent={() => userConfig.checkAgent()}
+              onOpenSetup={() => setShowSetup(true)}
+            />
           )}
         </div>
       </div>

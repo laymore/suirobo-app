@@ -8,7 +8,7 @@ import { IS_DESKTOP } from '../platform';
 
 const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
 
-export type ViewType = 'dashboard' | 'agent' | 'factory' | 'manual' | 'backtest' | 'livetrade';
+export type ViewType = 'dashboard' | 'agent' | 'factory' | 'manual' | 'backtest' | 'livetrade' | 'preferences';
 
 interface SidebarProps {
   currentView: ViewType;
@@ -65,7 +65,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'factory',   icon: '🏭', label: t('sidebar.nav.factory') },
     { id: 'backtest',  icon: '🧪', label: t('sidebar.nav.backtest') },
   ];
-  const menuItems = isDesktop ? allMenuItems.filter(m => m.id !== 'dashboard') : allMenuItems;
+  // Desktop adds a Settings entry (unified Preferences); web stays untouched.
+  const menuItems = isDesktop
+    ? [...allMenuItems.filter(m => m.id !== 'dashboard'), { id: 'preferences' as ViewType, icon: '⚙️', label: 'Settings' }]
+    : allMenuItems;
 
   return (
     <div style={{
