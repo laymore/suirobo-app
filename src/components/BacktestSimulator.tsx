@@ -18,6 +18,7 @@ import {
 import { useCurrentAccount } from '@mysten/dapp-kit';
 import { AGENT_URL } from '../agent/agentUrl';
 import OptimizerPanel from './OptimizerPanel';
+import RobustnessPanel from './RobustnessPanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -739,6 +740,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
 
   // ── Optimizer ──────────────────────────────────────────────────────
   const [showOptimizer, setShowOptimizer] = useState(false);
+  const [showRobustness, setShowRobustness] = useState(false);
   // Load a winning parameter set from the optimizer back into the Tester form.
   const applyOptParams = useCallback((patch: Record<string, number>) => {
     const S: Record<string, (n: number) => void> = {
@@ -1170,6 +1172,20 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
             🔬 OPTIMIZE — find best parameters
           </button>
 
+          {/* Robustness Lab — walk-forward + Monte-Carlo overfit check */}
+          <button
+            onClick={() => setShowRobustness(true)}
+            disabled={isLoading || filteredData.length < 120}
+            title={filteredData.length < 120 ? 'Need a longer data window' : 'Stress-test this config for over-fitting'}
+            style={{
+              padding: '9px', borderRadius: 8, cursor: filteredData.length < 120 ? 'not-allowed' : 'pointer',
+              background: 'rgba(139,92,246,0.08)', border: '1px solid #8b5cf6', color: '#a78bfa',
+              fontWeight: 700, fontSize: '0.8rem',
+            }}
+          >
+            🧪 ROBUSTNESS — is it over-fit?
+          </button>
+
           {/* Save the tested config as a local bot → My Bot */}
           <button
             onClick={handleSaveAsBot}
@@ -1387,6 +1403,13 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
           data={filteredData}
           onApply={applyOptParams}
           onClose={() => setShowOptimizer(false)}
+        />
+      )}
+      {showRobustness && (
+        <RobustnessPanel
+          baseCfg={cfg}
+          data={filteredData}
+          onClose={() => setShowRobustness(false)}
         />
       )}
     </div>
