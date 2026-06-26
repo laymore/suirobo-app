@@ -1293,6 +1293,8 @@ app.get('/api/livebot/state', (_req, res) => {
     indicators:  s.lastIndicators,
     tradeCount:  s.tradeCount,
     totalPnl:    s.totalPnl,
+    riskRatio:   s.riskRatio,
+    liqThreshold: s.liqThreshold,
     logs:        s.logs.slice(0, 50),
     lastUpdate:  s.lastUpdate,
   });

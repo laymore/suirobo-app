@@ -82,6 +82,11 @@ export interface LiveBotConfig {
   maxDailyLossPct?:     number;
   sessionStartHour?:    number;
   sessionEndHour?:      number;
+  // ── Liquidation guard (DeepBook margin) ──
+  // Flatten the open position when the on-chain risk ratio drops below this, so the
+  // protocol never force-liquidates the account (which costs a liquidation penalty).
+  // undefined → default = liquidationRiskRatio + 0.10 ; 0 → guard disabled.
+  liqGuardRatio?:       number;
   // ── Bot skill author wallet (receives the 0.005 SUI author share per OPEN) ──
   // No randomness — fee always goes to the author of the skill currently in use.
   // Omit / empty string → fee is skipped entirely (e.g. self-built unpublished skill).
@@ -134,6 +139,8 @@ interface BotState {
   lastUpdate:     string;
   pollInterval:   number;
   mode:           'agent' | 'direct';
+  riskRatio:      number | null;  // DeepBook margin risk ratio while in a position (null = flat/unknown)
+  liqThreshold:   number;          // protocol liquidationRiskRatio for the pool (e.g. 1.1)
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────────
@@ -146,6 +153,7 @@ const state: BotState = {
   lastIndicators: { rsi: 50, ema9: 0, ema21: 0, macdHist: 0, bbUpper: 0, bbLower: 0 },
   tradeCount: 0, totalPnl: 0, logs: [],
   lastUpdate: '', pollInterval: 30_000, mode: 'agent',
+  riskRatio: null, liqThreshold: 0,
 };
 
 // Lưu riêng private key trong memory, không vào state
@@ -437,6 +445,36 @@ async function getDbClientWithManager(address: string): Promise<{ dbClient: any;
     marginManagers: { [managerKey]: { marginManagerKey: managerKey, address: managerKey, poolKey } } as any,
   });
   return { dbClient, managerKey };
+}
+
+// ── Liquidation-guard health reads (DeepBook margin risk ratio) ──
+// getMarginManagerState returns the manager's live `riskRatio` (collateral vs debt,
+// valued by Pyth); the protocol force-liquidates when it falls to liquidationRiskRatio
+// (mainnet SUI/USDC = 1.1). We cache the client + threshold so each 10s read is a
+// single simulateTransaction. Reset on configure() when the wallet may change.
+let _liqThreshold = 0;
+let _healthDbClient: any = null;
+let _healthManagerKey = '';
+function resetHealthCache() { _healthDbClient = null; _healthManagerKey = ''; }
+
+async function readMarginHealth(address: string): Promise<{ riskRatio: number; liqThreshold: number } | null> {
+  try {
+    if (!address) return null;
+    if (!_healthDbClient || !_healthManagerKey) {
+      const r = await getDbClientWithManager(address);
+      _healthDbClient = r.dbClient; _healthManagerKey = r.managerKey;
+    }
+    if (!_liqThreshold) {
+      try { _liqThreshold = await _healthDbClient.getLiquidationRiskRatio('SUI_USDC'); }
+      catch { _liqThreshold = 1.1; }   // mainnet SUI/USDC default
+    }
+    const st = await _healthDbClient.getMarginManagerState(_healthManagerKey);
+    const riskRatio = Number(st?.riskRatio) || 0;
+    return { riskRatio, liqThreshold: _liqThreshold };
+  } catch {
+    resetHealthCache();   // stale manager id → re-resolve next time
+    return null;
+  }
 }
 
 /**
@@ -1124,6 +1162,23 @@ async function managementTick() {
     const exit = liveManage(cfg, price, { buy: false, sell: false });
     if (exit) { await closePosition(exit.reason, exit.price); return; }
 
+    // ── Liquidation guard ── flatten before DeepBook force-liquidates the account.
+    // Only in direct mode (the agent holds the margin account it can read + close).
+    if (state.mode === 'direct' && cfg.walletAddress) {
+      const h = await readMarginHealth(cfg.walletAddress);
+      if (h && h.riskRatio > 0) {
+        state.riskRatio = h.riskRatio;
+        state.liqThreshold = h.liqThreshold;
+        const guard = cfg.liqGuardRatio === 0 ? 0 : (cfg.liqGuardRatio || (h.liqThreshold + 0.10));
+        if (guard > 0 && state.position && h.riskRatio < guard) {
+          addLog('error', `🛟 Liquidation guard — risk ratio ${h.riskRatio.toFixed(3)} < ${guard.toFixed(2)} (liq ${h.liqThreshold}) → flattening to avoid liquidation`);
+          await closePosition('Manual', price);
+          broadcast({ type: 'LIQ_GUARD', riskRatio: h.riskRatio, guard, liqThreshold: h.liqThreshold });
+          return;
+        }
+      }
+    }
+
     broadcast({ type: 'POSITION_UPDATE', position: pos, price, indicators: state.lastIndicators, signal: state.lastSignal });
   } catch { /* transient ticker errors are fine — candle poll still manages */ }
 }
@@ -1146,6 +1201,7 @@ export const liveBotController = {
       _cachedPrivateKey = privateKey;
       addLog('info', '🔑 Private key loaded into memory (never written to disk)');
     }
+    resetHealthCache();   // wallet/manager may have changed → re-resolve on next health read
     state.config       = safeCfg;
     // Direct mode if explicitly requested (fallback to agent if not requested).
     // We don't silently fallback to agent mode if a key is missing, because

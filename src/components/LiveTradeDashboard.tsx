@@ -923,6 +923,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
       cooldownBars:        selectedSkill.cooldownBars,
       maxConsecLosses:     selectedSkill.maxConsecLosses,
       maxDailyLossPct:     selectedSkill.maxDailyLossPct,
+      liqGuardRatio:       (selectedSkill as any).liqGuardRatio,
       sessionStartHour:    selectedSkill.sessionStartHour,
       sessionEndHour:      selectedSkill.sessionEndHour,
       timeframe, pair, capitalSUI,
@@ -1072,6 +1073,21 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
               Day {dailyPnlPct >= 0 ? '+' : ''}{dailyPnlPct.toFixed(1)}%{dailyLossCap > 0 ? ` / cap -${dailyLossCap}%` : ''}
             </span>
           )}
+          {/* Liquidation health — DeepBook margin risk ratio while in a position.
+              The bot auto-flattens before the protocol's liquidation level. */}
+          {pos && (s as any).riskRatio != null && (s as any).riskRatio > 0 && (() => {
+            const rr = (s as any).riskRatio as number;
+            const liq = ((s as any).liqThreshold && (s as any).liqThreshold > 0) ? (s as any).liqThreshold as number : 1.1;
+            const col = rr < liq + 0.15 ? '#ef4444' : rr < liq + 0.40 ? '#f59e0b' : '#22c55e';
+            return (
+              <span style={{
+                fontSize: '0.62rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace',
+                background: `${col}1a`, color: col, border: `1px solid ${col}44`,
+              }} title={`Margin risk ratio. DeepBook force-liquidates at ${liq}; the bot auto-flattens before that.`}>
+                🛟 Health {rr.toFixed(2)}
+              </span>
+            );
+          })()}
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
