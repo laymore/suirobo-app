@@ -56,6 +56,7 @@ import { loadBotSkills, PRESET_SKILLS, type BotSkillConfig, SIGNAL_LABELS } from
 import type { LiveBotConfig } from '../../server/live_trade_agent';
 import { AGENT_URL, AGENT_WS_URL } from '../agent/agentUrl';
 import { withWsToken } from '../agent/agentToken';
+import { VerifiedTrackRecord } from './VerifiedTrackRecord';
 import { useUserConfig } from '../hooks/useUserConfig';
 import { usePythOracle } from '../hooks/usePythOracle';
 import { getMarginManagerDetail, pickBestSuiUsdcManager } from '../utils/marginDetail';
@@ -1795,6 +1796,9 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
           )}
         </div>
       </div>
+
+      {/* ═══════════════ VERIFIED LIVE TRACK RECORD ═══════════════ */}
+      <VerifiedTrackRecord history={displayHistory} />
 
       {/* ═══════════════════════ TRADE HISTORY ═══════════════════════ */}
       <div style={{ padding: '0 12px' }}>

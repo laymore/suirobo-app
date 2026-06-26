@@ -4,6 +4,7 @@
 .env.production
 server/bot_state.json
 server/state.json
+server/trade_history.json
 openclaw.json
 *.pem
 *.key
