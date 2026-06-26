@@ -14,6 +14,12 @@ const { fork } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
+
+// Per-launch API token shared between the agent (env) and the renderer (preload).
+// The agent rejects any /api or WS call that doesn't carry it, so a malicious web
+// page can't drive the local bot (it can't read this value).
+const AGENT_TOKEN = crypto.randomBytes(24).toString('hex');
 
 // When packaged (portable .exe), app files live inside app.asar and the agent
 // bundle is shipped unpacked under resources/. In dev (`npm run app`) everything
@@ -83,6 +89,7 @@ async function startAgent() {
     env: {
       ...process.env,
       SUIROBO_DESKTOP: '1',
+      SUIROBO_AGENT_TOKEN: AGENT_TOKEN,
       ...(storedKey ? { SUIROBO_DEV_WALLET: storedKey, SUIROBO_DEV_ADDRESS: addr } : {}),
     },
     stdio: ['ignore', agentLogFd, agentLogFd, 'ipc'],
@@ -113,6 +120,8 @@ ipcMain.handle('suirobo:clearKey', async () => {
   return { ok: true };
 });
 ipcMain.handle('suirobo:hasKey', () => !!readStoredKey());
+// Synchronous so the preload can expose it on window before the bundle runs.
+ipcMain.on('suirobo:agentToken', (e) => { e.returnValue = AGENT_TOKEN; });
 
 // ── Serve the built React app over loopback (absolute /assets paths work) ──
 const MIME = {

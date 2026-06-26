@@ -86,11 +86,29 @@ app.use(cors({
   origin: (o, cb) => cb(null, originAllowed(o)),
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Wallet-Address'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Wallet-Address', 'X-Suirobo-Token'],
   maxAge: 86400, // Cache preflight 24h
 }));
 
 app.use(express.json({ limit: '10mb' }));
+
+// ── Local API token (desktop hardening) ───────────────────────────────────────
+// The Electron app generates a per-launch token, hands it to this agent (env) AND
+// to its renderer (preload). When set, every /api/* call must carry it via the
+// X-Suirobo-Token header — so a malicious web page (even one served from *.wal.app,
+// which the CORS allowlist alone would permit) can't drive the bot, since it can't
+// read the token. When the agent runs standalone (downloaded by web users, no
+// Electron → no env token) enforcement is skipped so the existing web flow works.
+const AGENT_TOKEN = process.env.SUIROBO_AGENT_TOKEN || '';
+if (AGENT_TOKEN) console.log('🔐 Agent API token enforced on /api/*');
+app.use('/api', (req, res, next) => {
+  if (!AGENT_TOKEN) return next();              // standalone → not enforced
+  if (req.method === 'OPTIONS') return next();  // CORS preflight carries no auth
+  const got = (req.get('x-suirobo-token') || (req.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim();
+  if (got === AGENT_TOKEN) return next();
+  console.warn(`🔒 401 ${req.method} ${req.path} — missing/invalid agent token`);
+  return res.status(401).json({ error: 'Unauthorized — missing or invalid agent token.' });
+});
 
 const SYSTEM_PROMPT = `You are SUIROBO — an expert AI assistant for DeFi on Sui Blockchain, focused on DeepBook V3.
 

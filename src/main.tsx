@@ -9,6 +9,10 @@ import '@mysten/dapp-kit/dist/index.css'
 
 import './index.css'
 import App from './App.tsx'
+import { installAgentTokenInterceptor } from './agent/agentToken'
+
+// Attach the desktop agent token to every agent request, before anything fetches.
+installAgentTokenInterceptor()
 
 // Build fingerprint — value injected at build time (empty in clean checkouts).
 const __fp = import.meta.env.VITE_FP as string | undefined

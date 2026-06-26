@@ -55,6 +55,7 @@ async function pickSuiUsdcManager(suiClient: any, managerIds: string[]): Promise
 import { loadBotSkills, PRESET_SKILLS, type BotSkillConfig, SIGNAL_LABELS } from '../types/botSkill';
 import type { LiveBotConfig } from '../../server/live_trade_agent';
 import { AGENT_URL, AGENT_WS_URL } from '../agent/agentUrl';
+import { withWsToken } from '../agent/agentToken';
 import { useUserConfig } from '../hooks/useUserConfig';
 import { usePythOracle } from '../hooks/usePythOracle';
 import { getMarginManagerDetail, pickBestSuiUsdcManager } from '../utils/marginDetail';
@@ -559,7 +560,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
 
   // ── WebSocket ──
   const connectWS = useCallback(() => {
-    const ws = new WebSocket(`${AGENT_WS_URL}`);
+    const ws = new WebSocket(withWsToken(AGENT_WS_URL));
     wsRef.current = ws;
     ws.onopen  = () => { setWsConnected(true); ws.send(JSON.stringify({ type: 'GET_STATE' })); };
     ws.onclose = () => { setWsConnected(false); setTimeout(connectWS, 3000); };

@@ -257,6 +257,18 @@ function addLog(type: TradeLog['type'], msg: string, price?: number, pnl?: numbe
 const wss = new WebSocketServer({ port: 8080, host: '127.0.0.1' });
 console.log('🔌 LiveBot WebSocket (ws)  on ws://127.0.0.1:8080  (dev)');
 
+// WS control surface accepts SET_CONFIG / TOGGLE_BOT, so it gets the SAME guards
+// as the HTTP /api: origin must be allow-listed, and — on desktop, where a token
+// is provisioned — the connection must carry ?token=<token>.
+const WS_TOKEN = process.env.SUIROBO_AGENT_TOKEN || '';
+function wsOriginAllowed(origin?: string): boolean {
+  if (!origin || origin === 'null') return true;
+  try {
+    const h = new URL(origin).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.wal.app') || h.endsWith('.walrus.site');
+  } catch { return false; }
+}
+
 // wss://localhost:8081 cho Walrus HTTPS web — sync vì pkg không support dynamic import
 (() => {
   const DATA_ROOT2 = process.env.SUIROBO_DATA_DIR || process.cwd();
@@ -301,7 +313,15 @@ function broadcastState() {
   broadcast({ type: 'BOT_STATE', ...state, logs: state.logs.slice(0, 80) });
 }
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req: any) => {
+  // Reject cross-origin connections, and (desktop) those without the token.
+  const origin = req?.headers?.origin as string | undefined;
+  if (!wsOriginAllowed(origin)) { try { ws.close(1008, 'origin not allowed'); } catch {} return; }
+  if (WS_TOKEN) {
+    let tok = '';
+    try { tok = new URL(req?.url || '/', 'http://localhost').searchParams.get('token') || ''; } catch {}
+    if (tok !== WS_TOKEN) { try { ws.close(1008, 'invalid token'); } catch {} return; }
+  }
   ws.send(JSON.stringify({ type: 'BOT_STATE', ...state, logs: state.logs.slice(0, 80) }));
   ws.on('message', raw => {
     try {

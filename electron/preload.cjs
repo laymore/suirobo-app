@@ -8,6 +8,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('SUIROBO_DESKTOP', true);
+// Per-launch agent API token (synchronously fetched from main so it's on window
+// before the React bundle issues its first agent request).
+try { contextBridge.exposeInMainWorld('SUIROBO_AGENT_TOKEN', ipcRenderer.sendSync('suirobo:agentToken')); } catch { /* noop */ }
 contextBridge.exposeInMainWorld('suiroboDesktop', {
   saveKey:    (key) => ipcRenderer.invoke('suirobo:saveKey', key),
   clearKey:   ()    => ipcRenderer.invoke('suirobo:clearKey'),
