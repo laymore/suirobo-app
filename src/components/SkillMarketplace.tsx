@@ -3,6 +3,7 @@ import { useSuiClient, useSignAndExecuteTransaction, useCurrentAccount } from '@
 import { Transaction } from '@mysten/sui/transactions';
 import { AGENT_URL } from '../agent/agentUrl';
 import { PRESET_SKILLS } from '../types/botSkill';
+import { useOnchainActivity } from '../hooks/useOnchainActivity';
 
 /**
  * Bot-skill detector for marketplace categorization.
@@ -91,6 +92,8 @@ export function SkillMarketplace() {
   const suiClient = useSuiClient();
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const account = useCurrentAccount();
+  // Trustless "verified live" activity per creator, from on-chain fee events.
+  const { opensFor } = useOnchainActivity();
 
   useEffect(() => {
     suiClient.queryEvents({
@@ -444,8 +447,17 @@ export default skill;`
 
             {/* Footer */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1e293b', paddingTop: 12 }}>
-              <span style={{ fontSize: '0.75rem', color: '#475569', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: '0.75rem', color: '#475569', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 by {shortAddr(skill.author)}
+                {opensFor(skill.author) > 0 && (
+                  <span title="Real positions opened on mainnet by bots running this creator's skills — verifiable on-chain (suirobo_factory ExecutionFeePaid events). Can't be faked like a backtest."
+                    style={{
+                      fontSize: '0.6rem', fontWeight: 800, padding: '2px 7px', borderRadius: 5, whiteSpace: 'nowrap',
+                      background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)',
+                    }}>
+                    ✅ {opensFor(skill.author)} live on-chain
+                  </span>
+                )}
               </span>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 {installed.has(skill.id) ? (
