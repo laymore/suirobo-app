@@ -977,6 +977,33 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
     }
   };
 
+  // Panic button: stop the bot AND market-close any open position in one call.
+  const [killing, setKilling] = useState(false);
+  const handleKillSwitch = async () => {
+    if (!window.confirm('KILL SWITCH\n\nStop the bot and immediately close (flatten) any open position at market?')) return;
+    setKilling(true);
+    try {
+      const r = await fetch(`${AGENT_URL}/api/livebot/killswitch`, { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      setBotState(prev => ({ ...prev, active: false }));
+      alert(j?.message || (r.ok ? 'Bot stopped and flattened.' : 'Kill switch failed — check the bot log.'));
+    } catch {
+      // Agent unreachable → best-effort optimistic stop so the UI isn't stuck.
+      setBotState(prev => ({ ...prev, active: false }));
+      alert('Could not reach the agent. If a position is still open, close it from the position card or on-chain.');
+    } finally {
+      setKilling(false);
+    }
+  };
+
+  // Today's REALISED P&L (sum of closed-trade percents, UTC day) — mirrors the
+  // agent's daily-loss breaker so the user sees how close they are to the cap.
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const dailyPnlPct = tradeHistory
+    .filter((r: any) => r.closeTime && String(r.closeTime).slice(0, 10) === todayKey)
+    .reduce((s: number, r: any) => s + (r.pnlPct ?? 0), 0);
+  const dailyLossCap = botState.config?.maxDailyLossPct ?? 0;
+
   // Bot can start when a skill is picked AND we have a key (either the wizard
   // saved one, or the agent loaded one from .env) AND — for SUI margin — the
   // pool has enough USDC to size a position safely.
@@ -1031,6 +1058,18 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
           }}>
             {s.active ? '● RUNNING' : '■ STOPPED'}
           </span>
+          {/* Today's realised P&L vs the daily-loss circuit-breaker cap */}
+          {(dailyLossCap > 0 || dailyPnlPct !== 0) && (
+            <span style={{
+              fontSize: '0.62rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+              fontFamily: 'monospace',
+              background: dailyPnlPct < 0 ? 'rgba(239,68,68,0.10)' : 'rgba(16,185,129,0.10)',
+              color: dailyPnlPct < 0 ? '#f87171' : '#34d399',
+              border: `1px solid ${dailyPnlPct < 0 ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'}`,
+            }} title="Today's realised P&L (sum of closed-trade %), and the daily-loss limit that flattens + halts the bot">
+              Day {dailyPnlPct >= 0 ? '+' : ''}{dailyPnlPct.toFixed(1)}%{dailyLossCap > 0 ? ` / cap -${dailyLossCap}%` : ''}
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1038,6 +1077,18 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
           <button onClick={() => setShowConfig(v => !v)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #1e293b', background: showConfig ? '#1e293b' : 'transparent', color: '#64748b', fontSize: '0.73rem', cursor: 'pointer' }}>
             ⚙️ {showConfig ? 'Hide Config' : 'Config'}
           </button>
+          {/* Kill switch — visible whenever there is something to stop/flatten */}
+          {(s.active || pos) && (
+            <button onClick={handleKillSwitch} disabled={killing}
+              title="Stop the bot and flatten all positions immediately"
+              style={{
+                padding: '8px 14px', borderRadius: 7, cursor: killing ? 'wait' : 'pointer',
+                border: '1px solid #ef4444', background: 'rgba(239,68,68,0.12)',
+                color: '#fca5a5', fontWeight: 800, fontSize: '0.78rem', whiteSpace: 'nowrap',
+              }}>
+              {killing ? '⏳ Flattening…' : '🛑 Kill switch'}
+            </button>
+          )}
           {s.active
             ? <button onClick={handleStop} style={{ padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', fontWeight: 700, fontSize: '0.8rem' }}>⏹ Stop Bot</button>
             : <button onClick={handleStart} disabled={!canStart} style={{ padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem', color: canStart ? 'var(--sui-blue-ink)' : '#64748b', background: canStart ? 'var(--sui-blue)' : '#1e293b' }}>

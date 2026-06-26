@@ -930,6 +930,16 @@ let manageTimer:  ReturnType<typeof setInterval> | null = null;
 // EA bookkeeping (per bot run)
 let lastSignalBar = '';   // ISO date of the closed bar the last entry fired on
 let lastExitAt    = 0;    // Date.now() of the last closed trade (cooldownBars)
+let dailyLossTrippedDay = '';   // UTC date the daily-loss circuit breaker fired (one-shot/day)
+
+/** Today's REALIZED P&L as a sum of closed-trade percents (UTC day).
+ *  Matches the backtest convention (sum of per-trade pct, not compounded). */
+function dailyRealizedPct(): number {
+  const today = new Date().toISOString().slice(0, 10);
+  return tradeHistory
+    .filter(r => r.closeTime && r.closeTime.slice(0, 10) === today)
+    .reduce((s, r) => s + (r.pnlPct ?? 0), 0);
+}
 
 const TF_MS: Record<string, number> = {
   '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000,
@@ -983,10 +993,7 @@ function entryBlockReason(cfg: LiveBotConfig): string | null {
   }
 
   if ((cfg.maxDailyLossPct ?? 0) > 0) {
-    const today = new Date().toISOString().slice(0, 10);
-    const dayPct = tradeHistory
-      .filter(r => r.closeTime && r.closeTime.slice(0, 10) === today)
-      .reduce((s, r) => s + (r.pnlPct ?? 0), 0);
+    const dayPct = dailyRealizedPct();
     if (dayPct <= -cfg.maxDailyLossPct!) return `daily loss limit hit (${dayPct.toFixed(1)}%)`;
   }
   return null;
@@ -1021,6 +1028,22 @@ async function tradingTick() {
         bbPeriod: cfg.bbPeriod, bbStdDev: cfg.bbStdDev });
     state.lastIndicators = lastValues;
     state.lastSignal     = buy ? 'BUY' : sell ? 'SELL' : 'HOLD';
+
+    // ── Daily-loss circuit breaker (hard safety) ──
+    // Unlike entryBlockReason (which only skips NEW entries), this flattens any
+    // open position AND halts the bot for the rest of the UTC day. One-shot/day.
+    const dailyCap = cfg.maxDailyLossPct ?? 0;
+    if (dailyCap > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const dayPct = dailyRealizedPct();
+      if (dailyLossTrippedDay !== today && dayPct <= -dailyCap) {
+        dailyLossTrippedDay = today;
+        addLog('error', `🛑 Daily loss limit hit (${dayPct.toFixed(1)}% ≤ -${dailyCap}%) — flattening & halting until tomorrow`);
+        if (state.position) { try { await closePosition('Manual', price); } catch { /* logged in closePosition */ } }
+        liveBotController.stop();
+        return;
+      }
+    }
 
     // ── Manage the open position (shared EA rules) ──
     if (state.position) {
@@ -1122,6 +1145,7 @@ export const liveBotController = {
     if (!state.config) { addLog('error', 'No bot skill configured'); return; }
     state.active = true;
     lastSignalBar = '';   // reset EA new-bar gate per run
+    dailyLossTrippedDay = '';   // a manual (re)start clears the daily-loss breaker
     addLog('info', `🚀 Bot started [${state.mode.toUpperCase()} MODE]: ${state.config.botSkillName}`);
     if (state.mode === 'direct') addLog('info', '⚡ DIRECT MODE — the bot signs and executes orders itself, no confirmation needed');
     broadcastState();
@@ -1169,5 +1193,23 @@ export const liveBotController = {
     return state.position
       ? { ok: false, message: 'Close failed — see bot log for the on-chain error.' }
       : { ok: true,  message: 'Position closed manually.' };
+  },
+
+  /** KILL SWITCH — halt the bot AND flatten any open position at market, now.
+   *  One call for the panic button: stops the loop first (no new entries), then
+   *  closes the live position. Safe to call when flat (just stops). */
+  async killSwitch(): Promise<{ ok: boolean; message: string; flattened: boolean }> {
+    addLog('warning', '🛑 KILL SWITCH — stopping the bot and flattening all positions');
+    this.stop();
+    if (!state.position) return { ok: true, message: 'Bot stopped. No open position.', flattened: false };
+    const price = state.currentPrice || state.position.entryPrice;
+    try {
+      await closePosition('Manual', price);
+    } catch (e: any) {
+      addLog('error', `Kill switch: position close failed — ${e?.message || e}`);
+    }
+    return state.position
+      ? { ok: false, message: 'Bot stopped, but the position close FAILED — retry “Flatten” or close on-chain.', flattened: false }
+      : { ok: true,  message: 'Bot stopped and all positions flattened.', flattened: true };
   },
 };

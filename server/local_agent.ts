@@ -1330,6 +1330,16 @@ app.post('/api/livebot/closenow', async (_req, res) => {
   }
 });
 
+/** POST /api/livebot/killswitch — panic button: stop the bot AND flatten all positions */
+app.post('/api/livebot/killswitch', async (_req, res) => {
+  try {
+    const r = await liveBotController.killSwitch();
+    return res.status(r.ok ? 200 : 400).json(r);
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 /** GET /api/dev/wallet — trả về thông tin ví dev (không trả private key) */
 app.get('/api/dev/wallet', (_req, res) => {
   const hasKey     = !!process.env.SUIROBO_DEV_WALLET;
