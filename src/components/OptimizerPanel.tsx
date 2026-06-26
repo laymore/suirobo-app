@@ -40,6 +40,16 @@ const range = (min: number, max: number, step: number) => {
 interface Row { vals: Partial<Record<ParamKey, number>>; net: number; pf: number; sharpe: number; dd: number; trades: number }
 type SortKey = 'net' | 'pf' | 'sharpe' | 'dd' | 'trades';
 
+// ── Walk-forward (anchored): optimise Param 1 in-sample, validate out-of-sample ──
+const WF_FOLDS = 4;
+interface WfFold { fold: number; param: number; isNet: number; oosNet: number; oosTrades: number }
+interface WfResult { folds: WfFold[]; sumIS: number; sumOOS: number; wfe: number; oosProf: number; verdict: 'robust' | 'caution' | 'overfit'; param: ParamKey }
+const WF_VERDICT: Record<WfResult['verdict'], { label: string; color: string; bg: string }> = {
+  robust:  { label: '✅ Holds out-of-sample', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  caution: { label: '⚠️ Mixed',               color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  overfit: { label: '🚩 Curve-fit',            color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+};
+
 const OptimizerPanel: React.FC<{
   baseCfg: BacktestConfig;
   data: Candle[];
@@ -87,6 +97,53 @@ const OptimizerPanel: React.FC<{
     setTimeout(chunk, 0);
   }, [baseCfg, data, p1, r1, use2, p2, r2]);
 
+  // ── Walk-forward validate (uses Param 1) — the real overfit test ──
+  const [wfRunning, setWfRunning] = useState(false);
+  const [wfMsg, setWfMsg] = useState('');
+  const [wf, setWf] = useState<WfResult | null>(null);
+
+  const runWalkForward = useCallback(() => {
+    const vals = range(r1.min, r1.max, r1.step);
+    if (vals.length < 2) { alert('Give Param 1 a real range (≥2 values) to walk-forward optimise.'); return; }
+    if (vals.length > 60) { alert(`Too many Param-1 values (${vals.length}) for walk-forward — widen the step.`); return; }
+    const segLen = Math.floor(data.length / (WF_FOLDS + 1));
+    if (segLen < 80) { alert('Not enough data for walk-forward — use a longer window.'); return; }
+
+    setWfRunning(true); setWf(null);
+    const folds: WfFold[] = [];
+    let k = 1;
+    const step = () => {
+      setWfMsg(`fold ${k}/${WF_FOLDS}…`);
+      const oosStart = k * segLen;
+      const oosEnd = k === WF_FOLDS ? data.length : (k + 1) * segLen;
+      const isData = data.slice(0, oosStart);       // anchored in-sample (grows each fold)
+      const oosData = data.slice(oosStart, oosEnd);  // the unseen next slice
+      // Optimise Param 1 on the in-sample window (by net %).
+      let bestVal = vals[0], bestIs = -Infinity;
+      for (const v of vals) {
+        const r = runBacktest(isData, { ...baseCfg, [p1]: v } as BacktestConfig);
+        if (r.stats.netProfitPct > bestIs) { bestIs = r.stats.netProfitPct; bestVal = v; }
+      }
+      // Trade that best config forward on the out-of-sample slice.
+      const oos = runBacktest(oosData, { ...baseCfg, [p1]: bestVal } as BacktestConfig);
+      folds.push({ fold: k, param: bestVal, isNet: bestIs, oosNet: oos.stats.netProfitPct, oosTrades: oos.stats.totalTrades });
+      k++;
+      if (k <= WF_FOLDS) { setTimeout(step, 0); return; }
+
+      const sumIS = folds.reduce((s, f) => s + f.isNet, 0);
+      const sumOOS = folds.reduce((s, f) => s + f.oosNet, 0);
+      const wfe = sumIS > 0 ? sumOOS / sumIS : (sumOOS >= 0 ? 1 : 0);
+      const oosProf = folds.filter(f => f.oosNet > 0).length;
+      let verdict: WfResult['verdict'];
+      if (oosProf >= Math.ceil(WF_FOLDS * 0.75) && wfe >= 0.5) verdict = 'robust';
+      else if (oosProf <= Math.floor(WF_FOLDS * 0.25) || (sumIS > 0 && sumOOS < 0)) verdict = 'overfit';
+      else verdict = 'caution';
+      setWf({ folds, sumIS, sumOOS, wfe, oosProf, verdict, param: p1 });
+      setWfRunning(false); setWfMsg('');
+    };
+    setTimeout(step, 0);
+  }, [baseCfg, data, p1, r1]);
+
   const sorted = [...rows].sort((a, b) => sort === 'dd' ? a.dd - b.dd : (b as any)[sort] - (a as any)[sort]);
   const keys = Array.from(new Set(rows.flatMap(r => Object.keys(r.vals)))) as ParamKey[];
 
@@ -131,13 +188,56 @@ const OptimizerPanel: React.FC<{
             {use2 && <>{Sel(p2, pickP2)} {RangeRow(p2, r2, setR2)}</>}
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={run} disabled={running}
+            <button onClick={run} disabled={running || wfRunning}
               style={{ background: running ? '#1e293b' : 'linear-gradient(135deg,#10b981,#059669)', border: 'none', color: '#fff', fontWeight: 800, borderRadius: 8, padding: '9px 18px', fontSize: '0.82rem', cursor: running ? 'wait' : 'pointer' }}>
               {running ? `Running… ${progress}%` : '▶ Run optimization'}
+            </button>
+            <button onClick={runWalkForward} disabled={wfRunning || running}
+              title="Optimise Param 1 in-sample, then trade it on the unseen next period — the real out-of-sample test for over-fitting."
+              style={{ background: wfRunning ? '#1e293b' : 'rgba(139,92,246,0.12)', border: '1px solid #8b5cf6', color: '#a78bfa', fontWeight: 800, borderRadius: 8, padding: '9px 16px', fontSize: '0.8rem', cursor: wfRunning ? 'wait' : 'pointer' }}>
+              {wfRunning ? `Walk-forward ${wfMsg}` : '🔁 Walk-forward validate'}
             </button>
             {rows.length > 0 && <span style={{ fontSize: '0.72rem', color: '#475569' }}>{rows.length} combinations · sorted by Net %</span>}
           </div>
         </div>
+
+        {wf && (() => {
+          const u = WF_VERDICT[wf.verdict];
+          return (
+            <div style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 10, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  🔁 Walk-forward · {meta(wf.param).label}
+                </span>
+                <span style={{ fontWeight: 800, color: u.color, background: u.bg, border: `1px solid ${u.color}55`, padding: '2px 10px', borderRadius: 6, fontSize: '0.78rem' }}>{u.label}</span>
+                <span style={{ fontSize: '0.72rem', color: '#475569', marginLeft: 'auto' }}>
+                  {wf.oosProf}/{wf.folds.length} OOS folds profitable · efficiency {Math.round(wf.wfe * 100)}%
+                </span>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem' }}>
+                <thead><tr style={{ color: '#94a3b8' }}>
+                  {['Fold', `Best ${meta(wf.param).label}`, 'In-sample', 'Out-of-sample', 'OOS trades'].map((h, i) => (
+                    <th key={h} style={{ padding: '5px 8px', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {wf.folds.map(f => (
+                    <tr key={f.fold} style={{ borderTop: '1px solid #1e293b' }}>
+                      <td style={{ padding: '5px 8px' }}>#{f.fold}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{f.param}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: f.isNet >= 0 ? '#4ade80' : '#f87171' }}>{f.isNet >= 0 ? '+' : ''}{f.isNet.toFixed(1)}%</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: f.oosNet >= 0 ? '#22c55e' : '#ef4444' }}>{f.oosNet >= 0 ? '+' : ''}{f.oosNet.toFixed(1)}%</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>{f.oosTrades}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ fontSize: '0.62rem', color: '#475569', marginTop: 8, lineHeight: 1.5 }}>
+                Each fold optimises <strong style={{ color: '#a78bfa' }}>{meta(wf.param).label}</strong> on all data up to that point (in-sample), then trades the <strong>unseen next slice</strong> (out-of-sample). Healthy = OOS stays positive; a big in-sample→out-of-sample drop means the parameter was curve-fit.
+              </div>
+            </div>
+          );
+        })()}
 
         {rows.length > 0 && (
           <div style={{ background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 10, overflow: 'hidden' }}>
