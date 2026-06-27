@@ -412,6 +412,8 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
   const [showConfig,    setShowConfig]    = useState(true);
   // P3-4b — gate live entries by the on-chain order-book imbalance (live-only). Off by default.
   const [obiFilterOn,   setObiFilterOn]   = useState(false);
+  // DA-3b — feed the bot candles from the DeepBook on-chain fill-tape (SUI/USDC) instead of Binance. Off by default.
+  const [onchainCandlesOn, setOnchainCandlesOn] = useState(false);
 
   // ── DeepTrade (xBTC/USDC) per-user objects — created once via setup ──
   const [dtBalanceManager, setDtBalanceManager] = useState(() => localStorage.getItem('dt_balance_manager') || '');
@@ -928,6 +930,7 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
       maxDailyLossPct:     selectedSkill.maxDailyLossPct,
       liqGuardRatio:       (selectedSkill as any).liqGuardRatio,
       obiFilter:           obiFilterOn ? 0.10 : 0,
+      onchainCandles:      onchainCandlesOn,
       sessionStartHour:    selectedSkill.sessionStartHour,
       sessionEndHour:      selectedSkill.sessionEndHour,
       timeframe, pair, capitalSUI,
@@ -1121,7 +1124,8 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
       </div>
 
       {/* ═══════════ DEEPBOOK ORDER-BOOK (on-chain microstructure) ═══════════ */}
-      <OrderBookGauge filterOn={obiFilterOn} onToggleFilter={() => setObiFilterOn(v => !v)} />
+      <OrderBookGauge filterOn={obiFilterOn} onToggleFilter={() => setObiFilterOn(v => !v)}
+        candlesOn={onchainCandlesOn} onToggleCandles={() => setOnchainCandlesOn(v => !v)} />
 
       {/* ═══════════════════════ CONFIG PANEL ═══════════════════════ */}
       {showConfig && (

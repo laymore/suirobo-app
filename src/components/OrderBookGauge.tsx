@@ -16,7 +16,10 @@ const Cell: React.FC<{ label: string; value: string; color?: string }> = ({ labe
   </div>
 );
 
-const OrderBookGauge: React.FC<{ filterOn?: boolean; onToggleFilter?: () => void }> = ({ filterOn, onToggleFilter }) => {
+const OrderBookGauge: React.FC<{
+  filterOn?: boolean; onToggleFilter?: () => void;
+  candlesOn?: boolean; onToggleCandles?: () => void;
+}> = ({ filterOn, onToggleFilter, candlesOn, onToggleCandles }) => {
   const { book } = useOrderBook();
   if (!book) return null;
 
@@ -38,19 +41,33 @@ const OrderBookGauge: React.FC<{ filterOn?: boolean; onToggleFilter?: () => void
             fontSize: '0.6rem', fontWeight: 800, padding: '2px 8px', borderRadius: 5,
             background: `${lean.c}1a`, color: lean.c, border: `1px solid ${lean.c}55`,
           }}>{lean.txt} · OBI {obiPct >= 0 ? '+' : ''}{obiPct}%</span>
-          {onToggleFilter && (
-            <button onClick={onToggleFilter}
-              title="When on, the bot only opens LONG when the book is bid-heavy (and SHORT when ask-heavy). Live-only confirmation."
-              style={{
-                fontSize: '0.58rem', fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer', marginLeft: 'auto',
-                background: filterOn ? 'rgba(139,92,246,0.15)' : 'transparent',
-                border: `1px solid ${filterOn ? '#8b5cf6' : '#334155'}`,
-                color: filterOn ? '#a78bfa' : '#64748b',
-              }}>
-              {filterOn ? '✓ Live entry filter ON' : 'Use as entry filter'}
-            </button>
-          )}
-          {!onToggleFilter && <span style={{ fontSize: '0.58rem', color: '#475569', marginLeft: 'auto' }}>SUI/USDC · top 10 levels</span>}
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {onToggleCandles && (
+              <button onClick={onToggleCandles}
+                title="When on (SUI/USDC only), the bot builds its candles from the DeepBook on-chain fill-tape instead of Binance — no CEX REST in the live path. Bootstraps on start, then accumulates new fills each tick."
+                style={{
+                  fontSize: '0.58rem', fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
+                  background: candlesOn ? 'rgba(0,212,255,0.15)' : 'transparent',
+                  border: `1px solid ${candlesOn ? '#00d4ff' : '#334155'}`,
+                  color: candlesOn ? '#38bdf8' : '#64748b',
+                }}>
+                {candlesOn ? '✓ On-chain candles ON' : '📡 On-chain candles'}
+              </button>
+            )}
+            {onToggleFilter && (
+              <button onClick={onToggleFilter}
+                title="When on, the bot only opens LONG when the book is bid-heavy (and SHORT when ask-heavy). Live-only confirmation."
+                style={{
+                  fontSize: '0.58rem', fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
+                  background: filterOn ? 'rgba(139,92,246,0.15)' : 'transparent',
+                  border: `1px solid ${filterOn ? '#8b5cf6' : '#334155'}`,
+                  color: filterOn ? '#a78bfa' : '#64748b',
+                }}>
+                {filterOn ? '✓ Live entry filter ON' : 'Use as entry filter'}
+              </button>
+            )}
+            {!onToggleFilter && !onToggleCandles && <span style={{ fontSize: '0.58rem', color: '#475569' }}>SUI/USDC · top 10 levels</span>}
+          </div>
         </div>
 
         {/* Imbalance bar: green = bid depth, red = ask depth */}

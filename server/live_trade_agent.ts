@@ -26,6 +26,7 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { DeepBookClient } from '@mysten/deepbook-v3';
 import { detectLiveSignal, manageExit, inSession, calcMargin, type Candle, type IndicatorType, type ExitReason, type FilterBlock } from '../src/agent/backtestEngine.js';
+import { OnchainCandleFeed } from '../src/agent/deepbookTape.js';
 import { injectExecutionFee, injectBotOpenFee } from '../src/agent/tools/executionFee.js';
 import { buildOrderTx } from '../src/agent/tools/deeptrade_xbtc.js';
 
@@ -87,6 +88,10 @@ export interface LiveBotConfig {
   // protocol never force-liquidates the account (which costs a liquidation penalty).
   // undefined → default = liquidationRiskRatio + 0.10 ; 0 → guard disabled.
   liqGuardRatio?:       number;
+  // ── Sui-Native Data Spine: candles from the DeepBook on-chain fill-tape ──
+  // When true (SUI/USDC only), the bot builds candles from DeepBook fills instead of
+  // Binance — no CEX REST in the critical path. Default off. (DA-3b)
+  onchainCandles?:      boolean;
   // ── Order-book imbalance entry filter (live-only; DeepBook on-chain L2) ──
   // Require the order book to agree with the entry side: LONG only when OBI ≥ +t,
   // SHORT only when OBI ≤ −t (t = this fraction, e.g. 0.10). 0/undefined → off.
@@ -384,6 +389,32 @@ async function fetchCandles(pair: string, tf: string, limit = 120): Promise<Cand
     low:  parseFloat(k[3]), close: parseFloat(k[4]),
     volume: parseFloat(k[5]),
   }));
+}
+
+// ─── Candle source dispatcher (Binance vs DeepBook on-chain fill-tape) ─────────
+// Default = Binance (unchanged). When cfg.onchainCandles is set AND the pair is
+// SUI/USDC, candles come purely from the on-chain DeepBook fill-tape (no CEX REST):
+// bootstrap once, then accumulate new fills each tick. Stays Binance-free even on a
+// feed error (returns what it has → the tick's "not enough data" guard retries).
+let _onchainFeed: OnchainCandleFeed | null = null;
+async function getCandles(cfg: LiveBotConfig, limit: number): Promise<Candle[]> {
+  const onSuiUsdc = (cfg.pair || '').toUpperCase().replace(/\//g, '_') === 'SUI_USDC';
+  if (cfg.onchainCandles && onSuiUsdc) {
+    try {
+      if (!_onchainFeed) {
+        _onchainFeed = new OnchainCandleFeed();
+        const n = await _onchainFeed.bootstrap(getSuiClient(), 120);
+        addLog('info', `📡 On-chain candle feed bootstrapped (${n} DeepBook fills, no Binance)`);
+      } else {
+        await _onchainFeed.update(getSuiClient());
+      }
+      return _onchainFeed.candles(cfg.timeframe);
+    } catch (e: any) {
+      addLog('warning', `📡 On-chain feed error: ${e?.message || e}`);
+      return _onchainFeed ? _onchainFeed.candles(cfg.timeframe) : [];
+    }
+  }
+  return fetchCandles(cfg.pair, cfg.timeframe, limit);
 }
 
 // ─── Sui Client (lazy-init) ───────────────────────────────────────────────────
@@ -1084,7 +1115,7 @@ async function tradingTick() {
     // MTF filter needs a deep history so the HTF Supertrend has warmed up
     // (e.g. H4 ST(10) on M5 ⇒ ≥ 11 closed H4 buckets ⇒ ≥ 528 M5 bars).
     const lookback = cfg.htfMinutes ? 1000 : 121;
-    const candles = await fetchCandles(cfg.pair, cfg.timeframe, lookback);
+    const candles = await getCandles(cfg, lookback);
     candlesCache = candles; // expose to the UI chart — same data the bot trades on
     if (candles.length < 36) { addLog('warning', `Not enough data (${candles.length} candles)`); return; }
 
@@ -1238,6 +1269,7 @@ export const liveBotController = {
       addLog('info', '🔑 Private key loaded into memory (never written to disk)');
     }
     resetHealthCache();   // wallet/manager may have changed → re-resolve on next health read
+    _onchainFeed = null;  // re-bootstrap the on-chain candle feed for the new run
     state.config       = safeCfg;
     // Direct mode if explicitly requested (fallback to agent if not requested).
     // We don't silently fallback to agent mode if a key is missing, because
