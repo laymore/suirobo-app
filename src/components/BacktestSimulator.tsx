@@ -15,10 +15,14 @@ import {
   loadBotSkills, upsertBotSkill, PRESET_SKILLS, TEMPLATE_SKILLS,
   type BotSkillConfig,
 } from '../types/botSkill';
-import { useCurrentAccount } from '@mysten/dapp-kit';
+import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit';
 import { AGENT_URL } from '../agent/agentUrl';
 import OptimizerPanel from './OptimizerPanel';
 import RobustnessPanel from './RobustnessPanel';
+import { fetchDeepBookFills, fillsToCandles } from '../agent/deepbookTape';
+
+// Backtest timeframe label (M5/M15/…) → milliseconds, for the on-chain fill aggregator.
+const TF_TO_MS: Record<string, number> = { M5: 300_000, M15: 900_000, M30: 1_800_000, H1: 3_600_000, H4: 14_400_000, D1: 86_400_000 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -509,6 +513,25 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
   // ── Data ──
   const [btcData,      setBtcData]      = useState<Candle[]>([]);
   const [isLoading,    setIsLoading]    = useState(true);
+  // DA-2 — selectable data source: historical files vs live DeepBook on-chain fill-tape.
+  const suiClient = useSuiClient();
+  const [dataSource,   setDataSource]   = useState<'file' | 'onchain'>('file');
+  const [onchainData,  setOnchainData]  = useState<Candle[]>([]);
+  const [onchainBusy,  setOnchainBusy]  = useState(false);
+  const [onchainMsg,   setOnchainMsg]   = useState('');
+  const loadOnchain = useCallback(async () => {
+    setOnchainBusy(true); setOnchainMsg('Querying DeepBook fills…'); setResult(null);
+    try {
+      const fills = await fetchDeepBookFills(suiClient as any, { pages: 120 });
+      const candles = fillsToCandles(fills, TF_TO_MS[timeframe] ?? 300_000);
+      setOnchainData(candles);
+      const hrs = fills.length ? ((fills[fills.length - 1].ts - fills[0].ts) / 3_600_000).toFixed(1) : '0';
+      const tip = candles.length < 35 ? ' — use M5 for more candles (recent window; full history = indexer)' : '';
+      setOnchainMsg(`${candles.length} ${timeframe} candles from ${fills.length} on-chain fills (~${hrs}h)${tip}`);
+    } catch (e: any) {
+      setOnchainMsg('Failed to read on-chain fills: ' + (e?.message || e));
+    } finally { setOnchainBusy(false); }
+  }, [suiClient, timeframe]);
 
   // ── Result ──
   const [result,       setResult]       = useState<BacktestResult | null>(null);
@@ -695,6 +718,9 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
 
   // ── Filtered data by duration (single calendar month or full dataset) ──
   const filteredData = useMemo(() => {
+    // On-chain source: use the freshly-fetched DeepBook candles as-is (the calendar-
+    // month filter doesn't apply to a live recent window).
+    if (dataSource === 'onchain') return onchainData;
     if (duration.startsWith('m')) {
       const mm = String(parseInt(duration.slice(1))).padStart(2, '0');
       return btcData.filter(c => c.date.slice(5, 7) === mm);
@@ -707,7 +733,7 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
     if (duration === '2m')  return btcData.slice(0, Math.min(btcData.length, 59 * cpd + 30));
     if (duration === '3m')  return btcData.slice(0, Math.min(btcData.length, 90 * cpd + 30));
     return btcData;
-  }, [btcData, duration, timeframe]);
+  }, [btcData, duration, timeframe, dataSource, onchainData]);
 
   // ── Build config ──
   const cfg: BacktestConfig = {
@@ -895,6 +921,34 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
           {/* Asset & Timeframe & Duration */}
           <section>
             <div style={{ fontSize: '0.62rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>📅 Data</div>
+
+            {/* DA-2 — data source: historical file vs live DeepBook on-chain fill-tape */}
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: '0.68rem', color: '#64748b', display: 'block', marginBottom: 4 }}>Source</label>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {([['file', '📁 File'], ['onchain', '📡 On-chain']] as const).map(([k, lbl]) => (
+                  <button key={k} onClick={() => { setDataSource(k); setResult(null); }} style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 7,
+                    border: `1px solid ${dataSource === k ? '#00d4ff66' : '#1e293b'}`,
+                    background: dataSource === k ? 'rgba(0,212,255,0.10)' : 'transparent',
+                    color: dataSource === k ? '#00d4ff' : '#475569',
+                    cursor: 'pointer', fontSize: '0.7rem', fontWeight: dataSource === k ? 700 : 400,
+                  }}>{lbl}</button>
+                ))}
+              </div>
+              {dataSource === 'onchain' && (
+                <>
+                  <button onClick={loadOnchain} disabled={onchainBusy} style={{
+                    width: '100%', marginTop: 6, padding: '7px', borderRadius: 7, border: '1px solid #00d4ff',
+                    background: onchainBusy ? '#1e293b' : 'rgba(0,212,255,0.12)', color: '#00d4ff',
+                    fontWeight: 700, fontSize: '0.68rem', cursor: onchainBusy ? 'wait' : 'pointer',
+                  }}>{onchainBusy ? '⏳ Reading DeepBook…' : '↻ Load recent on-chain candles'}</button>
+                  <div style={{ fontSize: '0.58rem', color: '#475569', marginTop: 4, lineHeight: 1.4 }}>
+                    {onchainMsg || `Live DeepBook SUI/USDC fills → ${timeframe} candles. Recent window only; full history = indexer (phase 2).`}
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Asset Picker — BTC vs SUI */}
             <div style={{ marginBottom: 8 }}>
