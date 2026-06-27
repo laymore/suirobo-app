@@ -57,6 +57,7 @@ import type { LiveBotConfig } from '../../server/live_trade_agent';
 import { AGENT_URL, AGENT_WS_URL } from '../agent/agentUrl';
 import { withWsToken } from '../agent/agentToken';
 import { VerifiedTrackRecord } from './VerifiedTrackRecord';
+import OrderBookGauge from './OrderBookGauge';
 import { useUserConfig } from '../hooks/useUserConfig';
 import { usePythOracle } from '../hooks/usePythOracle';
 import { getMarginManagerDetail, pickBestSuiUsdcManager } from '../utils/marginDetail';
@@ -1115,6 +1116,9 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
           }
         </div>
       </div>
+
+      {/* ═══════════ DEEPBOOK ORDER-BOOK (on-chain microstructure) ═══════════ */}
+      <OrderBookGauge />
 
       {/* ═══════════════════════ CONFIG PANEL ═══════════════════════ */}
       {showConfig && (
