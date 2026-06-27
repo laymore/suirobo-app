@@ -1,6 +1,6 @@
 /**
- * TxConfirmModal — HITL Popup xác nhận trade
- * Show risk warning cho Margin/Predict
+ * TxConfirmModal — human-in-the-loop trade confirmation popup.
+ * Shows a risk warning for Margin / Predict before signing.
  */
 import type { PendingTx } from '../hooks/useDeepTradeAgent';
 
@@ -12,7 +12,7 @@ interface Props {
 
 const RISK_MESSAGES: Record<string, string> = {
   margin_liquidation:
-    '⚠️ This margin position can be LIQUIDATED if the margin ratio falls below the safety threshold (20%). You can lose all assets thế chấp.',
+    '⚠️ This margin position can be LIQUIDATED if the margin ratio falls below the safety threshold (20%). You can lose all assets pledged as collateral.',
   predict_loss:
     '⚠️ Binary options can WIPE OUT your entire stake if the prediction is wrong.',
 };
