@@ -87,6 +87,11 @@ export interface LiveBotConfig {
   // protocol never force-liquidates the account (which costs a liquidation penalty).
   // undefined → default = liquidationRiskRatio + 0.10 ; 0 → guard disabled.
   liqGuardRatio?:       number;
+  // ── Order-book imbalance entry filter (live-only; DeepBook on-chain L2) ──
+  // Require the order book to agree with the entry side: LONG only when OBI ≥ +t,
+  // SHORT only when OBI ≤ −t (t = this fraction, e.g. 0.10). 0/undefined → off.
+  // Not back-testable (book depth isn't in OHLC), so live-only.
+  obiFilter?:           number;
   // ── Bot skill author wallet (receives the 0.005 SUI author share per OPEN) ──
   // No randomness — fee always goes to the author of the skill currently in use.
   // Omit / empty string → fee is skipped entirely (e.g. self-built unpublished skill).
@@ -475,6 +480,20 @@ async function readMarginHealth(address: string): Promise<{ riskRatio: number; l
     resetHealthCache();   // stale manager id → re-resolve next time
     return null;
   }
+}
+
+// Read the DeepBook SUI/USDC order-book imbalance (top 10 L2 levels). Read-only
+// devInspect — no manager / key needed. Returns OBI ∈ [-1,1] or null on failure.
+const OBI_READ_ADDR = '0x0000000000000000000000000000000000000000000000000000000000000001';
+async function readOrderBookObi(): Promise<number | null> {
+  try {
+    const db = new DeepBookClient({ client: getSuiClient() as any, network: 'mainnet', address: OBI_READ_ADDR });
+    const lvl: any = await db.getLevel2TicksFromMid('SUI_USDC', 10);
+    const sum = (a: number[]) => (a || []).reduce((s, x) => s + (Number(x) || 0), 0);
+    const bidVol = sum(lvl.bid_quantities), askVol = sum(lvl.ask_quantities);
+    const tot = bidVol + askVol;
+    return tot > 0 ? (bidVol - askVol) / tot : null;
+  } catch { return null; }
 }
 
 /**
@@ -1125,6 +1144,23 @@ async function tradingTick() {
           addLog('warning', `🚧 ${state.lastSignal} signal skipped — ${block}`);
           lastSignalBar = lastBar; // don't re-log every poll for the same bar
         } else {
+          // ── Order-book imbalance gate (live-only): require the on-chain book to
+          //    agree with the entry side before opening. ──
+          const obiTh = cfg.obiFilter ?? 0;
+          if (obiTh > 0) {
+            const obi = await readOrderBookObi();
+            if (obi !== null) {
+              const side = buy ? 'LONG' : 'SHORT';
+              const aligned = side === 'LONG' ? obi >= obiTh : obi <= -obiTh;
+              if (!aligned) {
+                addLog('warning', `🚧 ${side} skipped — order-book imbalance ${(obi * 100).toFixed(0)}% not aligned (need ${side === 'LONG' ? '≥ +' : '≤ −'}${Math.round(obiTh * 100)}%)`);
+                lastSignalBar = lastBar;   // one attempt per bar
+                broadcastState();
+                return;
+              }
+              addLog('info', `📊 Order book confirms ${side} (OBI ${(obi * 100).toFixed(0)}%)`);
+            }
+          }
           lastSignalBar = lastBar;
           await openPosition(cfg, buy ? 'LONG' : 'SHORT', price);
         }
