@@ -1,18 +1,18 @@
 {
   "name": "Autobots",
   "publisher": "Team Autobots",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "built_at": "2026-06-28T00:00:00.000Z",
   "format": "zip",
-  "filename": "Autobots-desktop-v1.1.0.zip",
-  "size_bytes": 117250126,
-  "size_mb": 111.82,
-  "sha256": "b539a6078b5a18668d808c66046f4bad94004d30a2741d44083fa4c0808aa152",
+  "filename": "Autobots-desktop-v1.1.1.zip",
+  "size_bytes": 117263538,
+  "size_mb": 111.83,
+  "sha256": "f0cee6e15ab070dda8c280770e8d314878d9e7c34365db2fccd13128e5fe24a8",
   "platform": "win-x64",
   "node_version": "portable",
-  "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.0/Autobots-desktop-v1.1.0.zip",
+  "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.1/Autobots-desktop-v1.1.1.zip",
   "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
   "published_at": "2026-06-28T00:00:00.000Z",
   "epochs": 50,
-  "changelog": "The full Autobots Desktop app. Enter your key locally and run the bot 24/7 with self-signing. Sui-native data spine (DeepBook on-chain fill-tape candles + order-book imbalance filter), pro toolkit (Optimizer, Robustness Lab, anchored walk-forward), and hard safety interlocks (kill-switch, max-daily-loss, liquidation guard). A standalone local agent (autobots-agent-v1.1.0.zip) is also attached to the release."
+  "changelog": "Security hardening (from an external audit): desktop wallet key encrypted at rest with OS-level safeStorage/DPAPI (legacy keys auto-migrate); no API key can leak into the public bundle; bot_state versioned + position validated on load; Electron opens only http/https links. Plus the full Sui-native data spine, pro backtest toolkit, and hard safety interlocks."
 }

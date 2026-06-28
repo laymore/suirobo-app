@@ -2,6 +2,22 @@
   {
     "name": "Autobots",
     "publisher": "Team Autobots",
+    "version": "1.1.1",
+    "built_at": "2026-06-28T00:00:00.000Z",
+    "size_bytes": 117263538,
+    "size_mb": 111.83,
+    "sha256": "f0cee6e15ab070dda8c280770e8d314878d9e7c34365db2fccd13128e5fe24a8",
+    "platform": "win-x64",
+    "node_version": "portable",
+    "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
+    "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.1/Autobots-desktop-v1.1.1.zip",
+    "published_at": "2026-06-28T00:00:00.000Z",
+    "epochs": 50,
+    "changelog": "Security hardening: encrypted key at rest (safeStorage/DPAPI), no key leak vectors, versioned bot_state, stricter Electron link handling."
+  },
+  {
+    "name": "Autobots",
+    "publisher": "Team Autobots",
     "version": "1.1.0",
     "built_at": "2026-06-28T00:00:00.000Z",
     "size_bytes": 117250126,
@@ -13,6 +29,6 @@
     "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.0/Autobots-desktop-v1.1.0.zip",
     "published_at": "2026-06-28T00:00:00.000Z",
     "epochs": 50,
-    "changelog": "The full Autobots Desktop app (Windows, portable). Self-custody 24/7 auto-signing, Sui-native on-chain data, pro backtest toolkit, and hard safety interlocks."
+    "changelog": "Autobots rebrand + Sui-native data spine + desktop pro toolkit. First Autobots-branded desktop build."
   }
 ]
