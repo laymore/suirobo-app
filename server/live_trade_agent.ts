@@ -176,21 +176,37 @@ if (_cachedPrivateKey) {
   console.log(`🔑 [Dev Wallet] Loaded from .env — Address: ${devAddr}`);
 }
 
+// Bump when the persisted shape changes incompatibly. On a version mismatch we
+// keep the harmless counters but DROP any saved position — loading a stale/malformed
+// position is the dangerous case (the bot would think it holds something it doesn't).
+const STATE_VERSION = 2;
+function isValidPosition(p: any): boolean {
+  return !!p && typeof p === 'object'
+    && (p.type === 'LONG' || p.type === 'SHORT')
+    && typeof p.entryPrice === 'number' && isFinite(p.entryPrice)
+    && typeof p.borrowAmount === 'number' && isFinite(p.borrowAmount);
+}
+
 try {
   if (fs.existsSync(STATE_FILE)) {
     const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    state.position   = saved.position   ?? null;
-    state.tradeCount = saved.tradeCount ?? 0;
-    state.totalPnl   = saved.totalPnl   ?? 0;
-    state.config     = saved.config     ?? null;
-    state.mode       = saved.mode       ?? 'agent';
+    const compatible = saved.version === STATE_VERSION;
+    state.position   = (compatible && isValidPosition(saved.position)) ? saved.position : null;
+    state.tradeCount = Number.isFinite(saved.tradeCount) ? saved.tradeCount : 0;
+    state.totalPnl   = Number.isFinite(saved.totalPnl)   ? saved.totalPnl   : 0;
+    state.config     = saved.config ?? null;
+    state.mode       = saved.mode   ?? 'agent';
+    if (!compatible && saved.position) {
+      console.log('[bot_state] schema changed — dropped a stale saved position (started flat)');
+    }
   }
 } catch { /* ignore */ }
 
 function persistState() {
   try {
-    // ⚠️  KHÔNG lưu privateKey vào disk
+    // ⚠️  Never write the privateKey to disk.
     fs.writeFileSync(STATE_FILE, JSON.stringify({
+      version: STATE_VERSION,
       position: state.position, tradeCount: state.tradeCount,
       totalPnl: state.totalPnl, config: state.config, mode: state.mode,
     }));

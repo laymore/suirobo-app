@@ -207,9 +207,13 @@ app.whenReady().then(async () => {
   win.removeMenu();
   win.loadURL(url);
 
-  // External links open in the system browser, not inside the app.
+  // Only ever open http/https. External links go to the system browser; the app's
+  // own localhost content stays in-app. Any other scheme (file:, javascript:,
+  // app-protocol handlers like steam://, etc.) is denied outright.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url) && !url.includes('127.0.0.1')) { shell.openExternal(url); return { action: 'deny' }; }
+    if (!/^https?:\/\//i.test(url)) return { action: 'deny' };
+    const isLocal = url.includes('127.0.0.1') || url.includes('localhost');
+    if (!isLocal) { shell.openExternal(url); return { action: 'deny' }; }
     return { action: 'allow' };
   });
 });
