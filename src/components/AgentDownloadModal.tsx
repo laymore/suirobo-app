@@ -16,6 +16,7 @@ interface AgentManifest {
   published_at?: string;
   size_bytes?: number;
   size_mb?: number;
+  filename?: string;
   sha256?: string;
   platform?: string;
   node_version?: string;
@@ -326,11 +327,10 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 📥 Installation
               </div>
               <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.7rem', color: '#475569', lineHeight: 1.8 }}>
-                <li>Download <code style={{ color: '#94a3b8' }}>suirobo-agent-v{current.version}.zip</code> → <strong>Extract All</strong></li>
-                <li>Double-click <code style={{ color: '#94a3b8' }}>suirobo-agent.exe</code> → SmartScreen → "More info" → "Run anyway"</li>
-                <li>Console window opens: <strong style={{ color: '#10b981' }}>Autobots — Team Autobots</strong></li>
-                <li>Installs to <code style={{ color: '#94a3b8' }}>%LOCALAPPDATA%\Suirobo</code> + auto-starts</li>
-                <li>Refresh the page → the agent auto-connects</li>
+                <li>Download <code style={{ color: '#94a3b8' }}>{current.filename || `Autobots-v${current.version}.zip`}</code> → <strong>Extract All</strong></li>
+                <li>Double-click <code style={{ color: '#94a3b8' }}>Autobots.exe</code> → SmartScreen → "More info" → "Run anyway"</li>
+                <li>The app opens — enter your key <strong>locally</strong> to run the 24/7 auto bot</li>
+                <li>Your key never leaves your machine — self-custody, open source</li>
               </ol>
             </div>
           )}

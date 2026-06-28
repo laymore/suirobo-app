@@ -2,17 +2,17 @@
   {
     "name": "Autobots",
     "publisher": "Team Autobots",
-    "version": "1.0.35",
-    "built_at": "2026-06-21T13:55:00.000Z",
-    "size_bytes": 28541596,
-    "size_mb": 27.22,
-    "sha256": "3034e4bbd262535980819e7471e976818699fb7e1d639f498a7fea0b6d133a6a",
+    "version": "1.1.0",
+    "built_at": "2026-06-28T00:00:00.000Z",
+    "size_bytes": 117250126,
+    "size_mb": 111.82,
+    "sha256": "b539a6078b5a18668d808c66046f4bad94004d30a2741d44083fa4c0808aa152",
     "platform": "win-x64",
-    "node_version": "node22",
+    "node_version": "portable",
     "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
-    "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.0.35/suirobo-agent-v1.0.35.zip",
-    "published_at": "2026-06-21T06:40:00.000Z",
+    "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.0/Autobots-desktop-v1.1.0.zip",
+    "published_at": "2026-06-28T00:00:00.000Z",
     "epochs": 50,
-    "changelog": "Live bot now opens REAL swap-based DeepBook margin positions (mainnet-validated): LONG = borrow USDC -> buy SUI, SHORT = borrow SUI -> sell SUI; close swaps back and repays the FULL debt so strategy flips (LONG<->SHORT) work. Hardened with the DeepBook 1-SUI lot minimum, a collateral-aware leverage cap, and net-of-fees PnL. Also fixed sub-$1 TP/SL rounding that closed positions instantly."
+    "changelog": "The full Autobots Desktop app (Windows, portable). Self-custody 24/7 auto-signing, Sui-native on-chain data, pro backtest toolkit, and hard safety interlocks."
   }
 ]
