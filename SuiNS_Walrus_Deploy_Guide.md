@@ -1,52 +1,53 @@
-# Quy Trình Triển Khai App Lên Walrus & Link SuiNS
+# Deploying the app to Walrus & linking SuiNS
 
-Để cập nhật và phát hành (deploy) phiên bản mới của ứng dụng `Suirobo App` lên hệ sinh thái **Walrus Sites** và liên kết với tên miền **SuiNS** (`autobots.sui`), hãy làm theo quy trình bài bản dưới đây.
+To build, deploy a new version of the **Autobots app** to **Walrus Sites**, and link it to the **SuiNS** domain (`autobots.sui`), follow this process.
 
-## Bước 1: Build source code
+## Step 1: Build the source
 
-Đảm bảo bạn đã lưu toàn bộ code. Chạy lệnh sau để build React app ra thư mục `dist`:
+Make sure everything is saved, then build the React app into `dist`:
 
 ```bash
 npm run build
 ```
 
-*(Nếu báo lỗi `&&`, hãy chạy riêng `npx tsc -b` rồi `npx vite build`)*
+*(If `&&` errors out, run `npx tsc -b` then `npx vite build` separately.)*
 
-## Bước 2: Publish bản build lên Walrus
+## Step 2: Publish the build to Walrus
 
-Dùng công cụ `site-builder` do Sui cung cấp để đẩy thư mục `dist` lên Walrus (lưu trữ phi tập trung). Cấp cho nó thời hạn lưu trữ (VD: 50 epochs).
+Use Sui's `site-builder` tool to push the `dist` folder to Walrus (decentralized storage). Give it a storage duration (e.g. 50 epochs).
 
 ```bash
 site-builder publish dist --epochs 50
 ```
 
-> [!NOTE] 
-> Chờ khoảng 1-2 phút. Lệnh này sẽ tạo ra một object mới trên mạng lưới Sui và lưu trữ toàn bộ các file (JS, CSS, HTML, JSON) lên Walrus. 
+> [!NOTE]
+> Wait ~1–2 minutes. This creates a new object on Sui and stores all files (JS, CSS, HTML, JSON) on Walrus.
 
-**Kết quả thành công sẽ có dạng:**
+**A successful result looks like:**
 ```
-Created new site! 
+Created new site!
 New site object ID: 0xf793b13bcb434d1b2cb2381956b54cec6b1a28dbca040ee83b63953f54c8e2f1
 ```
-👉 Hãy copy cái **New site object ID** này.
+👉 Copy this **New site object ID**.
 
-## Bước 3: Cập nhật Site ID vào Script liên kết
+> To update the EXISTING site (keep the same object ID + the SuiNS link), use `site-builder update dist <site-object-id> --epochs N` instead of `publish` — the current site object is `0xf070fa29afac7f54de6f849d6e4391b181ba511205e1e4474cf58bfa39537a81`.
 
-Mở file `link-suins-walrus.ts` nằm trong thư mục gốc. 
-Tìm hằng số `WALRUS_SITE_ID` ở phần đầu file và thay bằng **Site Object ID** bạn vừa copy ở Bước 2.
+## Step 3: Put the Site ID into the link script
+
+Open `link-suins-walrus.ts` in the project root. Find the `WALRUS_SITE_ID` constant near the top and replace it with the **Site Object ID** from Step 2.
 
 ```typescript
-const WALRUS_SITE_ID = '0xf793b13...'; // <-- Thay bằng ID mới
+const WALRUS_SITE_ID = '0xf793b13...'; // <-- replace with the new ID
 ```
 
-## Bước 4: Liên kết Domain SuiNS với Site ID mới
+## Step 4: Link the SuiNS domain to the new Site ID
 
-Chạy script bằng tsx để gọi Smart Contract, thiết lập lại địa chỉ website cho tên miền `autobots.sui`:
+Run the script with tsx to call the smart contract and repoint `autobots.sui` to the website:
 
 ```bash
 npx tsx link-suins-walrus.ts
 ```
 
-> [!SUCCESS] 
-> Nếu xuất hiện `LINK THÀNH CÔNG!`, giao dịch của bạn đã được xác nhận trên mainnet.
-> Bạn có thể truy cập ngay vào: **https://autobots.wal.app** (có thể mất 1-2 phút cho DNS portal cập nhật bộ đệm).
+> [!SUCCESS]
+> When you see `LINK SUCCESSFUL!`, the transaction is confirmed on mainnet.
+> You can visit **https://autobots.wal.app** right away (the portal DNS cache may take 1–2 minutes to update).

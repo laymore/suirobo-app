@@ -1,7 +1,7 @@
 /**
- * Build Suirobo Agent → Single .exe distributable
+ * Build Autobots Agent → Single .exe distributable
  *
- * Output: dist-agent/suirobo-agent.exe (~61 MB)
+ * Output: dist-agent/autobots-agent.exe (~61 MB)
  *
  * Steps:
  *  1. Đọc version từ argv hoặc package.json
@@ -17,13 +17,13 @@ const crypto = require('crypto');
 const ROOT     = process.cwd();
 const DIST_DIR = path.join(ROOT, 'dist-agent');
 const BUNDLE   = path.join(DIST_DIR, 'agent-bundle.cjs');
-const EXE      = path.join(DIST_DIR, 'suirobo-agent.exe');
+const EXE      = path.join(DIST_DIR, 'autobots-agent.exe');
 
 // Version: argv[2] > package.json > 1.0.0
 const PKG_VERSION = require('./package.json').version || '1.0.0';
 const VERSION = process.argv[2] || PKG_VERSION;
 
-console.log(`📦 Building Suirobo Agent v${VERSION}`);
+console.log(`📦 Building Autobots Agent v${VERSION}`);
 
 if (!fs.existsSync(DIST_DIR)) fs.mkdirSync(DIST_DIR, { recursive: true });
 

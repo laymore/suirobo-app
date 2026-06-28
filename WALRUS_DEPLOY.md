@@ -1,91 +1,85 @@
-# 🌊 Deploy Suirobo lên Walrus Sites
+# 🌊 Deploy Autobots to Walrus Sites
 
-## 🎯 Hai cách deploy
+## 🎯 Two ways to deploy
 
-### A. Dùng Walgo Desktop (GUI - dễ nhất)
+### A. Walgo Desktop (GUI — easiest)
 
-1. Mở Walgo Desktop App
-2. Vào tab **CREATE** → **Init Walgo** (hoặc dùng menu **PROJECTS**)
-3. Chọn thư mục: `C:\Users\admin\Desktop\Suirobo\suirobo-app\dist`
-4. Vào **EDIT** → bấm **"⚡ Launch to Walrus"**
-5. Walgo sẽ:
-   - Đọc `ws-resources.json` đã có sẵn
-   - Trừ WAL từ ví dev (đã có 51 WAL)
-   - Trả về Site Object ID + URL `<id>.wal.app`
+1. Open the Walgo Desktop app.
+2. Go to the **CREATE** tab → **Init Walgo** (or use the **PROJECTS** menu).
+3. Pick the folder: the project's `dist` directory.
+4. Go to **EDIT** → click **"⚡ Launch to Walrus"**.
+5. Walgo will:
+   - read the existing `ws-resources.json`
+   - spend WAL from the dev wallet
+   - return the Site Object ID + the `<id>.wal.app` URL
 
-### B. Dùng CLI (script tự động)
+### B. CLI (automated script)
 
-#### Lần đầu publish:
+#### First-time publish:
 ```powershell
 .\deploy-walrus.ps1 publish
 ```
 
-#### Cập nhật site đã có:
+#### Update an existing site:
 ```powershell
 .\deploy-walrus.ps1 update -SiteId 0xABC123...
 ```
 
-#### Kiểm tra hạn của blobs:
+#### Check blob expiry:
 ```powershell
 .\deploy-walrus.ps1 sitemap -SiteId 0xABC123...
 ```
 
 ---
 
-## 📁 Cấu Hình Đã Sẵn Sàng
+## 📁 Pre-configured files
 
-| File | Mục đích |
+| File | Purpose |
 |------|---------|
-| `dist/ws-resources.json` | SPA routing — mọi route fallback về `index.html` |
+| `dist/ws-resources.json` | SPA routing — every route falls back to `index.html` |
 | `deploy-walrus.ps1` | Windows PowerShell script |
 | `deploy-walrus.sh` | Bash script (macOS/Linux/Git Bash) |
 
 ---
 
-## 🔑 Ví Dev Đã Cấu Hình
+## 🔑 Dev wallet (site owner)
 
 | | |
 |--|--|
 | **Address** | `0xafbc48fd349fb44ce9c6f2b33423e6ae7c826d53a25920a0d4c3c475e40889c5` |
 | **Network** | Mainnet |
-| **SUI Balance** | ~5.98 SUI |
-| **WAL Balance** | ~51.98 WAL |
+| **Needs** | a little SUI for gas + WAL for storage |
 
-Walgo Desktop tự nhận diện ví này (qua Sui CLI config).
+Walgo Desktop / site-builder auto-detect this wallet via the Sui CLI config. Note: if another tool (e.g. openclaw) flips the shared Sui CLI active address, pin the signer with `site-builder --wallet-address 0xafbc48fd…889c5 update …` (the flag must come before the `update` subcommand).
 
 ---
 
-## 💰 Chi Phí Deploy Tham Khảo
+## 💰 Reference deploy cost
 
 | Action | Cost |
 |--------|------|
-| Publish site mới (60 epochs ≈ 60 ngày) | ~1-3 WAL |
-| Update site (60 epochs) | ~0.5-2 WAL |
-| Mỗi MB blob × epochs = WAL cost | ~0.01 WAL/MB/epoch |
+| Publish a new site (60 epochs) | ~1–3 WAL |
+| Update a site (60 epochs) | ~0.5–2 WAL |
+| Per MB blob × epochs | ~0.01 WAL/MB/epoch |
 
-Bundle hiện tại: **1.25 MB** (gzip 362 KB) → rất nhẹ.
+The app bundle is light (a couple of MB), so `update` only re-uploads changed files.
 
 ---
 
-## ⚠️ Lưu Ý Production
+## ⚠️ Production notes
 
-### 1. Backend Local Agent
-Web app chạy trên Walrus chỉ là **frontend**. User vẫn cần:
-- Cài Local Agent (`.exe`) trên máy
-- Agent chạy tại `localhost:3001` để xử lý ký giao dịch
+### 1. The web app is wallet-signed
+The Walrus-hosted app is the **frontend only**. Connect a Slush wallet and trade (Manual or the in-browser Web Bot — you sign each trade). No key, no local agent required on the web.
 
-### 2. SetupWizard tự kiểm tra Agent
-Khi user mở app từ Walrus lần đầu:
-- Step 1: Kiểm tra `http://localhost:3001/health` → hiện hướng dẫn cài Agent nếu chưa có
-- Step 2-4: Cấu hình API key + ví + (tùy chọn) private key
+### 2. Hands-off 24/7 = the desktop app
+For fully autonomous 24/7 trading, download the **Autobots Desktop** app: the key is entered locally and the bot self-signs. The web "Client Bot" tab is a landing page that links the desktop download.
 
-### 3. Bảo Mật Multi-User
-- API Key → `localStorage` (mã hóa nhẹ btoa)
-- Private Key → `sessionStorage` (tự xóa khi đóng tab)
-- **Không** có server trung gian — mọi thứ stay-local
+### 3. Multi-user security
+- No middleman server — everything stays local on the user's device.
+- The web never asks for or stores a private key.
 
-### 4. Cập Nhật Định Kỳ
-Blobs trên Walrus có thời hạn. Trước khi hết hạn:
+### 4. Periodic refresh
+Walrus blobs expire. Before they do:
 ```powershell
 .\deploy-walrus.ps1 update -SiteId <existing-id> -Epochs 60
 ```
@@ -94,18 +88,18 @@ Blobs trên Walrus có thời hạn. Trước khi hết hạn:
 
 ## 🐛 Troubleshooting
 
-| Lỗi | Cách fix |
-|-----|---------|
-| `Insufficient WAL balance` | Mua WAL trên Cetus hoặc swap từ SUI |
-| `Site object not found` | Kiểm tra đúng `SiteId` (chưa bị destroy) |
-| `404 trên SPA routes` | Đảm bảo `ws-resources.json` có `"/*": "/index.html"` |
-| `Bundle quá lớn` | Vite đã warning — nên code-split với `dynamic import()` |
+| Error | Fix |
+|-------|-----|
+| `Insufficient WAL balance` | Buy WAL (e.g. on Cetus) or swap from SUI |
+| `Site object not found` | Check the `SiteId` is correct (not destroyed) |
+| `404 on SPA routes` | Ensure `ws-resources.json` has `"/*": "/index.html"` |
+| `Transaction not signed by the correct sender` | Another tool flipped the active address — use `--wallet-address` (see above) |
+| `Bundle too large` | Vite already warns — code-split with dynamic `import()` |
 
 ---
 
-## 🔗 Hữu ích
+## 🔗 Useful links
 
 - Mainnet portal: https://wal.app
-- Walrus Docs: https://docs.wal.app
-- Walgo Desktop: đã cài tại `C:\Users\admin\AppData\Local\Programs\walgo\`
-- Site Builder CLI: `~/.walgo/bin/site-builder` (v2.8.0)
+- Walrus docs: https://docs.wal.app
+- Site Builder CLI: `~/.walgo/bin/site-builder`

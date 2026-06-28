@@ -1,34 +1,33 @@
-# 🔐 Security Policy — Suirobo Project
+# 🔐 Security Policy — Autobots
 
-## Tóm Tắt Trạng Thái
+## Status summary
 
-✅ **KHÔNG có key nào bị leak ra public.** Audit đã được tiến hành toàn diện.
+✅ **No keys are leaked publicly.** A full audit has been performed.
 
-| Kênh Public | Tình trạng |
-|-------------|-----------|
-| `https://autobots.wal.app` (Walrus mainnet) | ✅ Bundle 0 key |
-| `suirobo-agent.exe` (Walrus blob `xwXKOEL...`) | ✅ Binary 0 key |
-| Git history | ✅ Chưa có git repo → chưa từng commit |
-| GitHub remote | ✅ Chưa có remote → chưa từng push |
+| Public channel | Status |
+|----------------|--------|
+| `https://autobots.wal.app` (Walrus mainnet) | ✅ Bundle has 0 keys |
+| `autobots-agent.exe` / `Autobots.exe` (GitHub Releases) | ✅ Binary has 0 keys |
+| Git history (`github.com/laymore/suirobo-app`, public) | ✅ Only `*.example` templates tracked; no private keys ever committed |
 
 ---
 
-## Quy Tắc Quản Lý Secrets
+## Secret-management rules
 
-### 1. Phân Loại Secrets
+### 1. Secret classification
 
-| Loại | Nơi lưu | Ghi disk? | Trong git? |
-|------|---------|----------|-----------|
-| **Dev Private Key** | `.env` → `SUIROBO_DEV_WALLET` | ✅ Local only | ❌ Ignored |
-| **DeepSeek API Key** | `openclaw.json` → `apiKey` | ✅ Local only | ❌ Ignored |
-| **User Private Key** (Auto Bot) | `sessionStorage` browser | ❌ RAM only | N/A |
-| **User API Key** | `localStorage` browser (btoa) | ❌ Browser only | N/A |
-| **Test Wallet Address** | `.env` → `SUIROBO_DEV_ADDRESS` | ✅ Public OK | ✅ OK (chỉ address) |
+| Type | Stored in | On disk? | In git? |
+|------|-----------|----------|---------|
+| **Dev private key** | `.env` → `SUIROBO_DEV_WALLET` | ✅ Local only | ❌ Ignored |
+| **LLM API key** | `openclaw.json` → `apiKey` | ✅ Local only | ❌ Ignored |
+| **User private key** (Auto Bot) | browser `sessionStorage` | ❌ RAM only | N/A |
+| **User API key** | browser `localStorage` (btoa) | ❌ Browser only | N/A |
+| **Test wallet address** | `.env` → `SUIROBO_DEV_ADDRESS` | ✅ Public OK | ✅ OK (address only) |
 
-### 2. Files Bắt Buộc Trong `.gitignore`
+### 2. Files that MUST be in `.gitignore`
 
 ```
-# Sensitive — KHÔNG bao giờ commit
+# Sensitive — NEVER commit
 .env
 .env.local
 .env.production
@@ -40,36 +39,36 @@ openclaw.local.json
 server/bot_state.json
 server/state.json
 
-# Test files có chứa keys runtime (chỉ build local)
+# Test files that hold runtime keys (local build only)
 test-live-execute.ts
 test-live-borrow.ts
 test-live-repay.ts
 ```
 
-### 3. Quy Tắc Code
+### 3. Code rules
 
-❌ **TUYỆT ĐỐI KHÔNG** hardcode key/secret trong file `.ts`, `.tsx`, `.js`, `.cjs`, `.json` được track bởi git.
+❌ **NEVER** hardcode a key/secret in any `.ts`, `.tsx`, `.js`, `.cjs`, or `.json` file tracked by git.
 
-✅ **Luôn dùng** `process.env.<NAME>`:
+✅ **Always** use `process.env.<NAME>`:
 
 ```typescript
 // ✅ Good
-const apiKey = process.env.DEEPSEEK_API_KEY || '';
+const apiKey  = process.env.DEEPSEEK_API_KEY || '';
 const privKey = process.env.SUIROBO_DEV_WALLET || '';
 
-// ❌ Bad  
+// ❌ Bad
 const apiKey = 'sk-REDACTED_EXAMPLE_DO_NOT_HARDCODE';
 ```
 
-### 4. Setup Local Dev
+### 4. Local dev setup
 
 ```bash
-# 1. Copy template
+# 1. Copy the template
 cp openclaw.json.example openclaw.json
 
-# 2. Sửa openclaw.json — điền key thật
+# 2. Edit openclaw.json — fill in the real key
 
-# 3. Tạo .env
+# 3. Create .env
 cat > .env <<'EOF'
 SUIROBO_DEV_WALLET=suiprivkey1q...
 SUIROBO_DEV_ADDRESS=0x...
@@ -77,79 +76,78 @@ DEEPSEEK_API_KEY=sk-...
 EOF
 ```
 
-### 5. Multi-User Production (Walrus Deploy)
+### 5. Multi-user production (Walrus deploy)
 
-Khi user mới truy cập `https://autobots.wal.app`:
+When a new user opens `https://autobots.wal.app`:
 
-| Item | Cách user nhập | Nơi lưu |
-|------|---------------|--------|
-| AI API Key | Step 2 SetupWizard | `localStorage` browser (btoa encode) |
-| Sui Ví (chính thức) | Connect wallet button | Trong dApp Kit wallet (Slush, Sui Wallet, etc.) |
-| Auto Bot Private Key (tùy chọn) | Step 4 SetupWizard | `sessionStorage` browser (tự xóa khi đóng tab) |
+| Item | How the user enters it | Stored in |
+|------|------------------------|-----------|
+| Sui wallet | Connect Wallet button | inside the dApp-Kit wallet (Slush, Sui Wallet, etc.) |
+| Auto Bot private key (desktop only) | the desktop app, locally | the user's own machine — never the web |
 
-→ **Không có secret nào của user gửi lên server Suirobo.** Mọi thứ chạy trên máy user.
+→ **No user secret is ever sent to an Autobots server.** Everything runs on the user's machine. The web app is wallet-signed only and asks for no key.
 
 ---
 
-## Vận Hành Bảo Mật
+## Security operations
 
-### Trước khi commit code
+### Before committing code
 
 ```bash
-# Quét nhanh
+# Quick scan
 grep -rn "sk-[a-zA-Z0-9]\{20,\}\|suiprivkey1[a-z0-9]\{50,\}" \
   --include="*.ts" --include="*.tsx" --include="*.js" --include="*.cjs" \
   --include="*.json" . | grep -v node_modules | grep -v dist
 ```
 
-Nếu kết quả không trống → KHÔNG commit!
+If the result is non-empty → DO NOT commit.
 
-### Trước khi deploy lên Walrus
+### Before deploying to Walrus
 
 ```bash
-# Build trước
+# Build first
 npm run build
 
-# Verify bundle sạch
+# Verify the bundle is clean
 grep -c "sk-\|suiprivkey1" dist/assets/*.js
-# Kết quả 0 = an toàn deploy
+# Result 0 = safe to deploy
 
-# Verify không có .env, openclaw.json
+# Verify no .env / openclaw.json got bundled
 ls dist/ | grep -E "\.env|openclaw"
-# Kết quả trống = an toàn
+# Empty result = safe
 ```
 
 ---
 
-## Rotate Keys (Khi Lo Lắng)
+## Rotating keys (when in doubt)
 
-### Rotate DeepSeek API Key
+### Rotate the LLM API key
 
-1. Vào https://platform.deepseek.com/api_keys
-2. Tạo key mới
-3. Update `openclaw.json` → `apiKey`
-4. Update `.env` → `DEEPSEEK_API_KEY`
-5. Restart agent (`npm run agent`)
-6. Revoke key cũ trên DeepSeek dashboard
+1. Open your provider's API-key dashboard.
+2. Create a new key.
+3. Update `openclaw.json` → `apiKey`.
+4. Update `.env` → `DEEPSEEK_API_KEY`.
+5. Restart the agent (`npm run agent`).
+6. Revoke the old key on the provider dashboard.
 
-### Rotate Dev Wallet (Nếu chắc chắn lộ)
+### Rotate the dev wallet (if you are sure it leaked)
 
-⚠️ Phải transfer assets trước!
+⚠️ Transfer assets first!
 
 ```bash
-# 1. Tạo wallet mới
+# 1. Create a new wallet
 sui client new-address ed25519
 
-# 2. Transfer assets từ ví cũ → ví mới (qua Sui Wallet hoặc CLI)
+# 2. Transfer assets from the old wallet → the new one (via wallet or CLI)
 
-# 3. Export private key mới
+# 3. Export the new private key
 sui keytool export <new-address>
 
-# 4. Update .env với key mới
+# 4. Update .env with the new key
 ```
 
 ---
 
-## Báo Cáo Lỗ Hổng
+## Reporting a vulnerability
 
-Nếu phát hiện vulnerability, **không tạo issue public**. Email trực tiếp: security@suirobo.app
+If you find a vulnerability, **do not open a public issue**. Email directly: security@autobots.app

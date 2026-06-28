@@ -54,7 +54,7 @@ function markFirstRunDone() {
 // ─── 3. Auto-start on Windows boot ─────────────────────────────────────────
 function registerAutoStart() {
   if (process.platform !== 'win32') return;
-  const exePath = process.execPath; // path to suirobo-agent.exe
+  const exePath = process.execPath; // path to autobots-agent.exe
   // Add to Windows registry Run key
   const regCmd = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "SuiroboAgent" /t REG_SZ /d "\\"${exePath}\\"" /f`;
   exec(regCmd, (err) => {
@@ -103,8 +103,8 @@ function setupLogging() {
     fs.appendFileSync(path.join(LOG_DIR, 'crash.log'),
       `\n[${new Date().toISOString()}] ${err.stack || err.message}\n`);
     if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      origErr('❌ Port already in use — another Suirobo Agent (or another app) is running.');
-      origErr('   Close the other agent window / end suirobo-agent.exe in Task Manager,');
+      origErr('❌ Port already in use — another Autobots (or another app) is running.');
+      origErr('   Close the other agent window / end autobots-agent.exe in Task Manager,');
       origErr('   then open this file again.');
       origErr('\n   (this window closes in 15s)');
       setTimeout(() => process.exit(1), 15000);
@@ -173,7 +173,7 @@ function killOldAgentByPort(): Promise<boolean> {
       const pid = out?.trim().split(/\s+/).pop();
       if (err || !pid || !/^\d+$/.test(pid) || +pid === process.pid) return resolve(false);
       exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, (err2, out2) => {
-        if (err2 || !/suirobo/i.test(out2 || '')) return resolve(false);
+        if (err2 || !/autobots|suirobo/i.test(out2 || '')) return resolve(false);
         exec(`taskkill /PID ${pid} /F`, err3 => resolve(!err3));
       });
     });
@@ -183,7 +183,7 @@ function killOldAgentByPort(): Promise<boolean> {
 async function replaceOldInstance(): Promise<void> {
   if (!await pingOldAgent()) return; // ports free — nothing to do
 
-  console.log('♻️  Another Suirobo Agent is already running — replacing it with this version...');
+  console.log('♻️  Another Autobots is already running — replacing it with this version...');
   try {
     await fetch(`http://localhost:${AGENT_PORT}/api/shutdown`, {
       method: 'POST',
@@ -207,9 +207,9 @@ async function replaceOldInstance(): Promise<void> {
   }
 
   console.error('❌ Could not stop the running agent automatically.');
-  console.error('   Please close the old "Suirobo Agent" window (or end suirobo-agent.exe');
+  console.error('   Please close the old "Autobots" window (or end autobots-agent.exe');
   console.error('   in Task Manager), then open this file again.');
-  showNotification('❌ Suirobo Agent', 'Another agent is already running. Close it first, then reopen.');
+  showNotification('❌ Autobots', 'Another agent is already running. Close it first, then reopen.');
   await holdWindowOpen(15);
   process.exit(1);
 }
@@ -218,11 +218,11 @@ async function replaceOldInstance(): Promise<void> {
 async function bootstrap() {
   // Set console window title (hiển thị thay vì "node.exe" / random)
   try {
-    process.title = `Suirobo Agent — Team Autobots`;
+    process.title = `Autobots — Team Autobots`;
   } catch {}
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  🤖 Suirobo Agent v${CURRENT_VERSION}`);
+  console.log(`  🤖 Autobots v${CURRENT_VERSION}`);
   console.log(`     by Team Autobots`);
   console.log(`     https://autobots.wal.app`);
   console.log('═══════════════════════════════════════════════════════');
@@ -240,7 +240,7 @@ async function bootstrap() {
     console.log('🎉 First run — setting up...');
     markFirstRunDone();
     showNotification(
-      '🤖 Suirobo Agent installed',
+      '🤖 Autobots installed',
       'Agent is running. Open the browser to start AI trading.'
     );
     setTimeout(() => openBrowser(WEB_URL), 2000);
@@ -270,6 +270,6 @@ function loadLocalAgent() {
 
 bootstrap().catch(err => {
   console.error('❌ Bootstrap failed:', err);
-  showNotification('❌ Suirobo Agent error', String(err.message || err));
+  showNotification('❌ Autobots error', String(err.message || err));
   process.exit(1);
 });
