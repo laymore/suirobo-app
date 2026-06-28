@@ -505,7 +505,7 @@ app.post('/api/chat', async (req, res) => {
             finalProvider = 'deepseek';
             finalApiKey = deepseekConfig.apiKey;
             finalBaseUrl = deepseekConfig.baseUrl;
-            console.log(`[OpenClaw Link] Loaded apiKey from openclaw.json: ${finalApiKey.slice(0, 8)}...`);
+            console.log('[OpenClaw Link] Loaded apiKey from openclaw.json (redacted)');
           } else {
             throw new Error('No deepseek config found in openclaw.json');
           }

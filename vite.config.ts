@@ -37,7 +37,10 @@ export default defineConfig({
   },
   define: {
     'process.env.ADK_MODEL_OVERRIDE': JSON.stringify(''),
-    'process.env.DEEPSEEK_API_KEY': JSON.stringify(process.env.DEEPSEEK_API_KEY || ''),
+    // NEVER inject a real API key into the public browser bundle. The frontend
+    // never needs a server LLM key (the agent holds keys locally), so this is
+    // hardcoded empty — removing the build-env leak vector entirely.
+    'process.env.DEEPSEEK_API_KEY': JSON.stringify(''),
   },
   build: {
     chunkSizeWarningLimit: 1500,

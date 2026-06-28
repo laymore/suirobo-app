@@ -9,7 +9,7 @@
  *      it in the window. A preload flag trims the UI to Trade + Backtest + My Bot.
  *   3. Auto-accepts the localhost self-signed cert so there's no manual step.
  */
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, safeStorage } = require('electron');
 const { fork } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -37,14 +37,44 @@ let win = null;
 let agentLogFd = null;
 
 // ── Persistent wallet key, stored in the app's per-user data dir ──
+// Encrypted at rest with Electron safeStorage (DPAPI on Windows / Keychain on
+// macOS / libsecret on Linux) — a plaintext file with mode 0o600 is NOT enough
+// on Windows, where any process running as the same user can read it. Legacy
+// plaintext files are still readable and get re-encrypted on the next read.
 function keyFile() { return path.join(app.getPath('userData'), 'wallet.key'); }
-function readStoredKey() {
-  try { const k = fs.readFileSync(keyFile(), 'utf8').trim(); return k || null; } catch { return null; }
+
+function encAvailable() {
+  try { return !!(safeStorage && safeStorage.isEncryptionAvailable()); } catch { return false; }
 }
+
+function readStoredKey() {
+  let buf;
+  try { buf = fs.readFileSync(keyFile()); } catch { return null; }
+  if (!buf || buf.length === 0) return null;
+  // Try to decrypt (the normal path). If it isn't an encrypted blob (legacy
+  // plaintext from an older build), decryptString throws → fall back to utf8.
+  if (encAvailable()) {
+    try {
+      const dec = safeStorage.decryptString(buf).trim();
+      return dec || null;
+    } catch { /* legacy plaintext below */ }
+  }
+  const legacy = buf.toString('utf8').trim();
+  if (!legacy) return null;
+  // Migrate the legacy plaintext key to an encrypted file in place.
+  if (encAvailable()) { try { writeStoredKey(legacy); } catch {} }
+  return legacy;
+}
+
 function writeStoredKey(key) {
   const f = keyFile();
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, key, { encoding: 'utf8', mode: 0o600 });
+  if (encAvailable()) {
+    fs.writeFileSync(f, safeStorage.encryptString(key), { mode: 0o600 });
+  } else {
+    // No OS encryption backend (rare) — fall back to a restricted plaintext file.
+    fs.writeFileSync(f, key, { encoding: 'utf8', mode: 0o600 });
+  }
 }
 
 // Derive the Sui address from the private key (so the agent + UI show the wallet).
