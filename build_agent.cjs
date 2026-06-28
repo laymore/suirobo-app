@@ -62,7 +62,7 @@ const exeBuf = fs.readFileSync(EXE);
 const sha256 = crypto.createHash('sha256').update(exeBuf).digest('hex');
 
 const manifest = {
-  name: 'Suirobo Agent',
+  name: 'Autobots',
   publisher: 'Team Autobots',
   version: VERSION,
   built_at: new Date().toISOString(),

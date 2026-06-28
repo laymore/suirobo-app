@@ -107,3 +107,9 @@ NOTICE
 
 # Internal roadmap — local only (reveals strategy + open security gaps)
 DESKTOP_ROADMAP.md
+
+# Internal research / audits — local only (strategy + unshipped direction)
+INVERSION_RESEARCH.md
+UX_AUDIT_NEWBIE.md
+AGENT_AUDIT.md
+.agents/

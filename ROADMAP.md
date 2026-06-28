@@ -1,6 +1,6 @@
-# 🗺️ Suirobo Skill Factory Roadmap
+# 🗺️ Autobots Roadmap
 
-Tài liệu này theo dõi lộ trình phát triển, các tính năng đã hoàn thành và những mục tiêu tiếp theo của hệ sinh thái Suirobo Skill Factory.
+Tài liệu này theo dõi lộ trình phát triển, các tính năng đã hoàn thành và những mục tiêu tiếp theo của hệ sinh thái **Autobots** (built on the Suirobo stack: DeepBook V3 + Margin, Walrus, Pyth, SuiNS).
 
 ---
 
@@ -275,7 +275,30 @@ User → https://autobots.wal.app
 
 ---
 
-## 🔮 Giai đoạn 12: Mạng Lưới AI Tự Trị & Native App (Future Vision)
+## ✅ Giai đoạn 12: Desktop Pro App + Sui-Native Data + Autobots Rebrand (Hoàn thành)
+
+### 💻 Autobots Desktop — bản full là sản phẩm chính
+- [x] **Electron desktop app** (`npm run app` / `dist:win` → `Autobots`/`Suirobo.exe` ~112 MB portable) bundle local agent + UI rút gọn; key nhập cục bộ, tự ký 24/7, không cần ví trình duyệt.
+- [x] **EA pro toolkit** trên desktop: Optimizer (parameter sweep), Robustness Lab (period stability + 1000-run Monte-Carlo), anchored walk-forward (in-sample → out-of-sample).
+- [x] **Hard safety interlocks**: kill-switch + max-daily-loss breaker (flatten + halt), DeepBook liquidation guard, TP/SL mọi vị thế — deterministic, không phụ thuộc AI.
+- [x] **Account strip + Preferences** hợp nhất; Marketplace browse/install trên desktop.
+- [x] **Agent API token hardening**: token ngẫu nhiên mỗi lần chạy, chặn truy cập `/api/*` trái phép.
+
+### 🌊 Sui-Native Data Spine (bỏ CEX REST khỏi critical path)
+- [x] **DA-1** `deepbookTape.ts`: dựng nến OHLC từ **DeepBook on-chain fill-tape** (`OrderFilled` events, type-origin pkg) thay vì Binance.
+- [x] **DA-2** Backtest Simulator có nguồn dữ liệu "📡 On-chain" (DeepBook fills → nến → engine).
+- [x] **DA-3** Live bot dùng nến on-chain (opt-in, SUI/USDC): `OnchainCandleFeed` bootstrap + tích lũy fill mới mỗi tick — không Binance trong vòng quyết định.
+- [x] **Order-book imbalance**: gauge L2 DeepBook on-chain + bộ lọc OBI cho entry (live).
+- [x] **Verified track record**: kết quả bot on-chain theo ví → badge tin cậy trên Marketplace.
+
+### 🪪 Autobots rebrand + web thuần ví
+- [x] **Đổi tên bản cài đặt → "Autobots"**; ẩn hết version cũ ("Suirobo Agent"), chỉ hiện các bản Autobots.
+- [x] **Web app refocus**: login ví Slush là trade ngay — **không hỏi key, không Setup Wizard**. Ladder 3 nấc: Manual / Web Bot (tự ký) / Client Bot (= trang giới thiệu tải bản desktop). Bỏ nấc AI Agent + chế độ chạy kết hợp client+web. Bản full desktop mới nhập key + auto 24/24.
+- [x] **Home** đổi "agent" → "Autobots Desktop".
+
+---
+
+## 🔮 Giai đoạn 13: Mạng Lưới AI Tự Trị & Native App (Future Vision)
 - [ ] **Inter-Agent Communication**: Các Suirobo Agent giao tiếp, chia sẻ tín hiệu giao dịch P2P.
 - [ ] **Skill Governance**: DAO voting duyệt skill + đánh giá chất lượng tự động.
 - [ ] **Multi-chain Expansion**: Bridge sang Aptos, Solana, EVM-compatible chains.
@@ -306,8 +329,7 @@ User → https://autobots.wal.app
 ## 🚀 Cách Deploy Production
 
 ```powershell
-# Build & deploy lên Walrus (lần đầu)
-cd "C:\Users\admin\Desktop\Suirobo\suirobo-app"
+# Build & deploy lên Walrus (lần đầu) — chạy từ thư mục dự án
 .\deploy-walrus.ps1 publish
 
 # Cập nhật site đã có

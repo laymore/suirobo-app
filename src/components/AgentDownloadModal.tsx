@@ -157,7 +157,7 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
         }}>
           <div>
             <h3 style={{ margin: 0, color: '#e2e8f0', fontSize: '1.05rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-              ⬇️ Download Suirobo Agent
+              ⬇️ Download Autobots
               <span style={{ fontSize: '0.65rem', background: 'rgba(16,185,129,0.15)', color: '#10b981', padding: '2px 7px', borderRadius: 4, fontWeight: 700 }}>
                 FREE
               </span>
@@ -181,9 +181,9 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {!loading && history.length === 0 && (
+          {!loading && !current && history.length === 0 && (
             <div style={{ textAlign: 'center', padding: 40, color: '#475569' }}>
-              ⚠️ No agents published yet. Contact the admin to configure.
+              ⚠️ No builds published yet. Contact the admin to configure.
             </div>
           )}
 
@@ -268,14 +268,15 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* Older versions */}
-          {!loading && history.length > 1 && (
+          {/* Older versions — only Autobots-branded builds are listed; pre-rebrand
+              ("Suirobo Agent") releases are intentionally hidden. */}
+          {!loading && history.filter(v => !v.isCurrent && /autobots/i.test(v.name || '')).length > 0 && (
             <div>
               <div style={{ fontSize: '0.7rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
                 📜 Older versions
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {history.filter(v => !v.isCurrent).map(v => (
+                {history.filter(v => !v.isCurrent && /autobots/i.test(v.name || '')).map(v => (
                   <div key={v.version} style={{
                     background: '#080d1a', border: '1px solid #1e293b', borderRadius: 10,
                     padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -327,8 +328,8 @@ export const AgentDownloadModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.7rem', color: '#475569', lineHeight: 1.8 }}>
                 <li>Download <code style={{ color: '#94a3b8' }}>suirobo-agent-v{current.version}.zip</code> → <strong>Extract All</strong></li>
                 <li>Double-click <code style={{ color: '#94a3b8' }}>suirobo-agent.exe</code> → SmartScreen → "More info" → "Run anyway"</li>
-                <li>Console window opens: <strong style={{ color: '#10b981' }}>Suirobo Agent — Team Autobots</strong></li>
-                <li>Agent installs to <code style={{ color: '#94a3b8' }}>%LOCALAPPDATA%\Suirobo</code> + auto-starts</li>
+                <li>Console window opens: <strong style={{ color: '#10b981' }}>Autobots — Team Autobots</strong></li>
+                <li>Installs to <code style={{ color: '#94a3b8' }}>%LOCALAPPDATA%\Suirobo</code> + auto-starts</li>
                 <li>Refresh the page → the agent auto-connects</li>
               </ol>
             </div>
