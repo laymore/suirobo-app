@@ -139,17 +139,25 @@ module suirobo_contracts::suirobo_factory {
         assert!(payment_val >= skill.price, EInsufficientPayment);
 
         let buyer = tx_context::sender(ctx);
-
-        let platform_revenue_val = (payment_val * (marketplace.platform_fee_percent as u64)) / 100;
-        let creator_revenue_val = payment_val - platform_revenue_val;
-
+        let price = skill.price;
         let mut payment_mut = payment;
-        
+
+        // Refund any overpayment back to the buyer so a buyer can never lose the
+        // excess (revenue is split on the listed price, not on the coin sent).
+        if (payment_val > price) {
+            let refund = coin::split(&mut payment_mut, payment_val - price, ctx);
+            transfer::public_transfer(refund, buyer);
+        };
+        // payment_mut now holds exactly `price`.
+
+        let platform_revenue_val = (price * (marketplace.platform_fee_percent as u64)) / 100;
+        let creator_revenue_val = price - platform_revenue_val;
+
         // Take platform fee
         let platform_coin = coin::split(&mut payment_mut, platform_revenue_val, ctx);
         balance::join(&mut marketplace.treasury, coin::into_balance(platform_coin));
 
-        // Transfer remainder to creator
+        // Transfer remainder (exactly the creator's share) to creator
         transfer::public_transfer(payment_mut, skill.creator);
 
         // Issue receipt to buyer
