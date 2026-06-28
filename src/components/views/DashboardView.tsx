@@ -19,7 +19,7 @@ const heading: React.CSSProperties = {
   fontFamily: "'Space Grotesk', Inter, sans-serif", color: '#fff', fontWeight: 600,
 };
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentOnline }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [showDownload, setShowDownload] = useState(false);
   const [sui, setSui] = useState<Ticker | null>(null);
   const [agentVersion, setAgentVersion] = useState<string | null>(null);
@@ -40,9 +40,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
 
   const steps: { n: string; title: string; desc: string; cta: string; action: () => void }[] = [
     {
-      n: '1', title: 'Download the agent',
-      desc: 'A free local app that holds your keys on your own machine. Nothing touches our servers.',
-      cta: 'Download agent', action: () => setShowDownload(true),
+      n: '1', title: 'Download Autobots Desktop',
+      desc: 'The free desktop app that holds your keys on your own machine and runs bots 24/7. Nothing touches our servers.',
+      cta: 'Download desktop', action: () => setShowDownload(true),
     },
     {
       n: '2', title: 'Pick an Auto Bot',
@@ -74,31 +74,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
             Own your bot.<br />Own your keys.
           </h1>
           <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: '58ch', marginBottom: 22 }}>
-            Suirobo runs automated DeepBook trading bots from an agent on <em style={{ fontStyle: 'normal', color: '#cbd5e1' }}>your</em> computer.
-            Your private key never leaves your machine, and every Auto Bot's source is verifiable on Walrus.
+            Connect your wallet and trade right away, or run the Web Bot — you sign each trade. For hands-off 24/7
+            automation, the <em style={{ fontStyle: 'normal', color: '#cbd5e1' }}>Autobots Desktop</em> app runs bots on your
+            own machine — your key never leaves your device, and every Auto Bot's source is verifiable on Walrus.
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {agentOnline ? (
-              <button onClick={() => onNavigate?.('livetrade')} style={{
-                padding: '13px 26px', borderRadius: 11, border: 'none', cursor: 'pointer',
-                background: 'var(--sui-blue)', color: 'var(--sui-blue-ink)', fontWeight: 600, fontSize: '0.95rem',
-              }}>
-                Open Live Trade
-              </button>
-            ) : (
-              <button onClick={() => setShowDownload(true)} style={{
-                padding: '13px 26px', borderRadius: 11, border: 'none', cursor: 'pointer',
-                background: 'var(--sui-blue)', color: 'var(--sui-blue-ink)', fontWeight: 600, fontSize: '0.95rem',
-              }}>
-                Download agent (free)
-              </button>
-            )}
-            <button onClick={() => onNavigate?.('factory')} style={{
+            <button onClick={() => onNavigate?.('livetrade')} style={{
+              padding: '13px 26px', borderRadius: 11, border: 'none', cursor: 'pointer',
+              background: 'var(--sui-blue)', color: 'var(--sui-blue-ink)', fontWeight: 600, fontSize: '0.95rem',
+            }}>
+              Open Live Trade
+            </button>
+            <button onClick={() => setShowDownload(true)} style={{
               padding: '13px 26px', borderRadius: 11, cursor: 'pointer',
               background: 'transparent', border: '1px solid var(--sui-blue)', color: 'var(--sui-blue)',
               fontWeight: 600, fontSize: '0.95rem',
             }}>
-              Explore Auto Bots
+              Download Autobots Desktop
             </button>
           </div>
         </div>
@@ -126,7 +118,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
         </span>
         <span style={{ color: '#1e293b' }}>|</span>
         <span style={{ color: 'var(--text-secondary)' }}>
-          Agent <span style={{ fontFamily: 'monospace', color: '#fff' }}>{agentVersion ? `v${agentVersion}` : '—'}</span>
+          Desktop app <span style={{ fontFamily: 'monospace', color: '#fff' }}>{agentVersion ? `v${agentVersion}` : '—'}</span>
         </span>
         <span style={{ color: '#1e293b' }}>|</span>
         <span style={{ color: 'var(--text-secondary)' }}>Pairs: SUI/USDC margin · xBTC/USDC</span>
@@ -219,7 +211,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, agentO
         display: 'flex', gap: 26, flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-secondary)',
       }}>
         <span>🔑 Self-custody — keys stay on your machine</span>
-        <span>🌊 Agent + Auto Bot source hosted on Walrus</span>
+        <span>🌊 Autobots + Auto Bot source hosted on Walrus</span>
         <span>🧾 Build a bot people trade — earn 0.005 SUI per opened position</span>
       </div>
 

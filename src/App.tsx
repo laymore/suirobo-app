@@ -12,6 +12,7 @@ import { BacktestSimulator } from './components/BacktestSimulator';
 import { LiveTradeDashboard } from './components/LiveTradeDashboard';
 import { AccountStrip } from './components/AccountStrip';
 import { WebBotPanel } from './components/WebBotPanel';
+import { ClientBotLanding } from './components/ClientBotLanding';
 import { SetupWizard } from './components/SetupWizard';
 import DevMarginTest from './components/DevMarginTest';
 import type { BotSkillConfig } from './types/botSkill';
@@ -40,8 +41,11 @@ export default function App() {
   const [liveTier, setLiveTier] = useState<'manual' | 'web' | 'agent'>(IS_DESKTOP ? 'agent' : 'web');
   const { t } = useI18n();
 
-  // Check whether setup is required once the app has loaded
+  // Setup / API key is a DESKTOP-only concern. On the web you just connect your
+  // Slush wallet and trade (Manual or Web Bot, you sign) — no key, no wizard. The
+  // full 24/7 auto bot + key entry lives in the downloaded desktop app.
   useEffect(() => {
+    if (!IS_DESKTOP) return;
     // Delay 500ms to avoid a flash render
     const timer = setTimeout(() => {
       if (userConfig.needsSetup) setShowSetup(true);
@@ -165,42 +169,27 @@ export default function App() {
           )}
         </div>
 
-        {/* Setup Wizard button */}
-        <button onClick={() => setShowSetup(true)} title="Open Setup Wizard" style={{
-          padding: '6px 10px', borderRadius: 8,
-          background: 'transparent',
-          border: `1px solid ${userConfig.needsSetup ? 'rgba(245,158,11,0.4)' : '#334155'}`,
-          color: userConfig.needsSetup ? '#f59e0b' : '#475569',
-          fontSize: '0.78rem', cursor: 'pointer',
-        }}>
-          {userConfig.needsSetup ? '⚠️' : '🔧'}
-        </button>
+        {/* Setup Wizard button — desktop only (web needs no key/setup) */}
+        {IS_DESKTOP && (
+          <button onClick={() => setShowSetup(true)} title="Open Setup Wizard" style={{
+            padding: '6px 10px', borderRadius: 8,
+            background: 'transparent',
+            border: `1px solid ${userConfig.needsSetup ? 'rgba(245,158,11,0.4)' : '#334155'}`,
+            color: userConfig.needsSetup ? '#f59e0b' : '#475569',
+            fontSize: '0.78rem', cursor: 'pointer',
+          }}>
+            {userConfig.needsSetup ? '⚠️' : '🔧'}
+          </button>
+        )}
 
-        {/* AI settings + browser wallet — hidden in the desktop app (agent-signed, no extension) */}
+        {/* Web: just connect your Slush wallet and trade — no AI key entry.
+            (Desktop is agent-signed with a local key, no browser wallet.) */}
         {!IS_DESKTOP && (
-          <>
-            <button onClick={() => setShowApiSetup(s => !s)}
-              title={status === 'ready'
-                ? t('header.aiConnected', { provider: provider === 'gemini' ? 'Gemini' : 'DeepSeek' })
-                : t('header.aiDisconnected')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 16px', borderRadius: 8,
-                background: status === 'ready' ? 'transparent' : 'rgba(77,162,255,0.1)',
-                border: `1px solid ${status === 'ready' ? '#334155' : 'rgba(77,162,255,0.35)'}`,
-                color: status === 'ready' ? '#94a3b8' : 'var(--sui-blue)',
-                fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
-              }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusDot, display: 'inline-block', flexShrink: 0 }} />
-              {t('header.aiSettings')}
-            </button>
-
-            <ConnectButton style={{
-              background: 'var(--sui-blue)',
-              border: 'none', borderRadius: 8, color: 'var(--sui-blue-ink)',
-              fontSize: '0.8rem', fontWeight: 600, padding: '8px 16px',
-            }} />
-          </>
+          <ConnectButton style={{
+            background: 'var(--sui-blue)',
+            border: 'none', borderRadius: 8, color: 'var(--sui-blue-ink)',
+            fontSize: '0.8rem', fontWeight: 600, padding: '8px 16px',
+          }} />
         )}
       </header>
 
@@ -318,21 +307,17 @@ export default function App() {
           )}
           {currentView === 'livetrade' && (
             <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
-              {/* 4-rung automation ladder. Manual / Web / Client render inline here;
-                  AI Agent routes to the AI Assistant view in autonomous (auto) mode.
-                  Hidden in the desktop app — there it's Client Bot only (agent-signed). */}
+              {/* 3-rung automation ladder (web). Manual / Web Bot trade in-browser
+                  (you sign); Client Bot introduces the full desktop app (auto-sign
+                  24/7). Hidden in the desktop app — there it's Client Bot only. */}
               {!IS_DESKTOP && (() => {
                 const TIERS = [
-                  { id: 'manual', icon: '✍️', title: 'Manual',     sub: 'You decide & sign every trade',        nav: false },
-                  { id: 'web',    icon: '🌐', title: 'Web Bot',    sub: 'No install · bot signals, you sign',    nav: false },
-                  { id: 'agent',  icon: '💻', title: 'Client Bot', sub: 'Download agent · auto-sign 24/7',       nav: false },
-                  { id: 'ai',     icon: '🤖', title: 'AI Agent',   sub: 'AI decides · opens in AI Assistant (auto)', nav: true },
+                  { id: 'manual', icon: '✍️', title: 'Manual',     sub: 'You decide & sign every trade' },
+                  { id: 'web',    icon: '🌐', title: 'Web Bot',    sub: 'No install · bot signals, you sign' },
+                  { id: 'agent',  icon: '💻', title: 'Client Bot', sub: 'Full desktop app · auto-sign 24/7' },
                 ];
                 const idx = Math.max(0, TIERS.findIndex(t => t.id === liveTier));
-                const pick = (t: typeof TIERS[number]) => {
-                  if (t.nav) { setIsAutonomous(true); setCurrentView('agent'); }
-                  else { setLiveTier(t.id as 'manual' | 'web' | 'agent'); }
-                };
+                const pick = (t: typeof TIERS[number]) => setLiveTier(t.id as 'manual' | 'web' | 'agent');
                 return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, flexWrap: 'wrap' }}>
                     <span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -343,9 +328,9 @@ export default function App() {
                       position: 'relative', display: 'inline-flex', background: '#0a0f1d',
                       border: '1px solid #1e293b', borderRadius: 999, padding: 4, userSelect: 'none',
                     }}>
-                      {/* sliding highlight — tracks the active inline tier (1/4 width) */}
+                      {/* sliding highlight — tracks the active tier (1/3 width) */}
                       <div style={{
-                        position: 'absolute', top: 4, bottom: 4, left: 4, width: 'calc(25% - 4px)',
+                        position: 'absolute', top: 4, bottom: 4, left: 4, width: 'calc(33.333% - 4px)',
                         borderRadius: 999, background: 'linear-gradient(135deg, #00d4ff, #2563eb)',
                         transform: `translateX(${idx * 100}%)`, transition: 'transform 0.22s cubic-bezier(.4,0,.2,1)',
                         boxShadow: '0 2px 10px rgba(0,212,255,0.35)',
@@ -361,7 +346,6 @@ export default function App() {
                               color: active ? '#031018' : '#94a3b8', minWidth: 96, justifyContent: 'center',
                             }}>
                             <span style={{ fontSize: '1rem' }}>{t.icon}</span>{t.title}
-                            {t.nav && <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>↗</span>}
                           </button>
                         );
                       })}
@@ -373,19 +357,21 @@ export default function App() {
                 );
               })()}
 
-              {(!IS_DESKTOP && liveTier === 'manual') ? (
+              {IS_DESKTOP ? (
+                <LiveTradeDashboard
+                  onOpenManualTrade={() => setLiveTier('manual')}
+                  onOpenSetupWizard={() => setShowSetup(true)}
+                />
+              ) : liveTier === 'manual' ? (
                 <ManualTradeView
                   onAskAgent={handleAskFromManual}
                   disabled={status !== 'ready'}
                   dashboardData={dashboardData}
                 />
-              ) : (!IS_DESKTOP && liveTier === 'web') ? (
+              ) : liveTier === 'web' ? (
                 <WebBotPanel />
               ) : (
-                <LiveTradeDashboard
-                  onOpenManualTrade={() => setLiveTier('manual')}
-                  onOpenSetupWizard={() => setShowSetup(true)}
-                />
+                <ClientBotLanding />
               )}
             </div>
           )}

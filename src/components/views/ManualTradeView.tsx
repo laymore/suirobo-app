@@ -292,9 +292,12 @@ interface ManualTradeViewProps {
   onAskAgent: (text: string) => void;
   disabled: boolean;
   dashboardData: any;
+  /** Show the "ask the AI" buttons. Off by default — the web app is Autobots-only,
+   *  with no AI Assistant. Reserved for any future AI-enabled build. */
+  showAskAgent?: boolean;
 }
 
-export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, disabled, dashboardData }) => {
+export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, disabled, dashboardData, showAskAgent = false }) => {
   const [tab, setTab] = useState<'v3' | 'margin' | 'predict' | 'assets'>('v3');
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
@@ -2522,17 +2525,19 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
           <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
             📂 POSITIONS & OPEN ORDERS
           </h3>
-          <button
-            onClick={() => onAskAgent('Analyze the risk of my current positions')}
-            disabled={disabled}
-            style={{
-              background: 'transparent', border: '1px solid #334155', color: '#00d4ff',
-              padding: '6px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
-              opacity: disabled ? 0.5 : 1
-            }}
-          >
-            🤖 AI position risk analysis
-          </button>
+          {showAskAgent && (
+            <button
+              onClick={() => onAskAgent('Analyze the risk of my current positions')}
+              disabled={disabled}
+              style={{
+                background: 'transparent', border: '1px solid #334155', color: '#00d4ff',
+                padding: '6px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+                opacity: disabled ? 0.5 : 1
+              }}
+            >
+              🤖 AI position risk analysis
+            </button>
+          )}
         </div>
 
         {/* SPOT ORDERS TABLE */}
@@ -2679,11 +2684,13 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                                 style={{ background: '#ef444422', border: '1px solid #ef4444', color: '#ef4444', padding: '4px 10px', borderRadius: 6, cursor: marginPoolBusy ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>
                                 ✕ Close
                               </button>
-                              <button
-                                onClick={() => onAskAgent('Analyze the risk of my SUI/USDC margin position')}
-                                style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
-                                AI
-                              </button>
+                              {showAskAgent && (
+                                <button
+                                  onClick={() => onAskAgent('Analyze the risk of my SUI/USDC margin position')}
+                                  style={{ background: 'transparent', border: '1px solid #00d4ff', color: '#00d4ff', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+                                  AI
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -2827,15 +2834,17 @@ export const ManualTradeView: React.FC<ManualTradeViewProps> = ({ onAskAgent, di
                     <div style={{ fontSize: '0.72rem', color: '#94a3b8', flex: 1, display: 'flex', alignItems: 'center' }}>
                       <span style={{ color: '#a78bfa', marginRight: 4 }}>💡</span> Assistant tip: {pos.recommendation}
                     </div>
-                    <button
-                      onClick={() => onAskAgent(`Alert me if Predict position ${pos.positionId} risks reversing`)}
-                      style={{
-                        background: 'transparent', border: '1px solid #1e293b', color: '#94a3b8',
-                        padding: '6px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer'
-                      }}
-                    >
-                      Enable AI watch
-                    </button>
+                    {showAskAgent && (
+                      <button
+                        onClick={() => onAskAgent(`Alert me if Predict position ${pos.positionId} risks reversing`)}
+                        style={{
+                          background: 'transparent', border: '1px solid #1e293b', color: '#94a3b8',
+                          padding: '6px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer'
+                        }}
+                      >
+                        Enable AI watch
+                      </button>
+                    )}
                     <button
                       onClick={() => handleRedeemPredict(pos, idx)}
                       style={{
