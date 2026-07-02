@@ -1,97 +1,108 @@
-# Autobots — Stay Ahead of the AI-Agent Era
+# Autobots — Own your bot. Own your keys.
 
-### A smarter, cheaper, and more sustainable way to trade on-chain · [`autobots.wal.app`](https://autobots.wal.app)
+### Deterministic trading robots for DeepBook, Sui's on-chain order book · [`autobots.wal.app`](https://autobots.wal.app)
 
-> Self-custody · Built on Sui — DeepBook V3 & DeepBook Margin, Walrus, Pyth, SuiNS
+> Self-custody · Built on Sui: DeepBook V3 + Margin, Walrus, Pyth, SuiNS
 
-The AI-agent wave is sweeping across decentralized finance and promises to reshape the entire face of the market. In the middle of that frenzy, almost everyone dreams of the same ideal: an intelligent AI agent that analyzes the market and trades for them, 24/7, across decentralized exchanges (DEXs).
+Autobots is a self-custody ecosystem for building, testing, publishing, and running rule-based trading bots on Sui. Strategies are designed and stress-tested with AI-grade tooling, then executed by lean, deterministic robots that run 24/7 at near-zero marginal cost, signing from the user's own machine.
 
-**But there is a hard truth very few people see: the cost of running it is enormous.**
-
-Today's "smart" agents run on a constant stream of API calls to large language models (LLMs). If you let an agent continuously ingest real-time data, reason over every market move, and "call the API" non-stop to trade around the clock, the **inference cost becomes astronomical** — large enough to quietly erode, or even completely swallow, every bit of profit the bot earns.
-
-Having seen that wasteful dead end, **Autobots** was built on a fundamentally different philosophy — smarter, more durable, and more economical:
-
-- **AI agents are the strategy brain.** We point intelligent API agents at exactly what they're best at — auditing, deep backtesting, and research — to discover and shape the single most optimized strategy.
-- **Robotics are the 24/7 execution arm.** Once the AI agent has done the hard thinking and locked in a strategy, execution is handed off to pure, deterministic trading robots on the DEX. They run continuously, tirelessly, with **no expensive per-trade API cost** — yet they carry out the full intelligence the AI established up front.
+This document is structured around one question: **why would a skeptic pass on this — and why would they be wrong?** Each section answers one objection.
 
 ---
 
-## 1. Doing one thing well: driving real volume for DeepBook & the DEX ecosystem
+## Objection 1: "Crypto trading bots are a scam-saturated category."
 
-DeepBook is built as a high-performance, decentralized liquidity and trading layer. For core infrastructure like that, pouring heavy, bloated AI systems directly into the trading layer is unnecessary and dilutes the real goal.
+Correct. That is exactly why the design refuses every mechanic scams depend on:
 
-What DEXs and their users actually need most are **lean, effective tools that drive trading volume and attract new users.**
+- **There is no deposit address.** Funds stay in the user's wallet or their own on-chain margin account. We are a tool vendor, never a custodian, so there is nothing to rug and no honeypot for attackers.
+- **No yield promises.** The home page's primary call to action is not "deposit" but *"Test a strategy free"*: run a real backtest on real market data with no wallet connected, and see the drawdowns next to the returns.
+- **Everything is verifiable, not claimed.** Strategy source is pinned on Walrus (Sui's public storage network), live results are backed by transaction digests anyone can check on-chain, and every fee is stated in plain sight.
 
-Autobots focuses precisely on that strength:
+The pitch is not "trust us". The pitch is **"verify us"** — and that stance is only possible because the whole stack is on a public chain.
 
-- **No AI bloat at the point of execution.** We keep the trading layer fast, smooth, and cost-optimized.
-- **A volume-and-traffic engine.** By providing high-speed automation, we help users execute strategies cleanly on DeepBook. That directly adds liquidity, lifts exchange volume, and welcomes a wave of new users — people who want to trade professionally but don't want the headache of infrastructure or runaway API bills.
+## Objection 2: "AI-agent trading has broken unit economics."
+
+Also correct — for everyone doing it the obvious way. An always-on LLM agent that "watches the market" pays inference costs on every decision, around the clock. That cost quietly eats the very profit the bot earns; at retail position sizes it usually eats more than all of it.
+
+Autobots inverts the architecture:
+
+- **AI works at design time** — research, parameter optimization, robustness analysis, walk-forward validation — where one good decision is reused thousands of times.
+- **Execution is deterministic** — an EA-style rules engine (signals on closed candles, TP/SL/breakeven/trailing, session filters, risk sizing) that runs 24/7 with **no per-trade API bill at all**.
+
+Same intelligence, applied where it compounds instead of where it burns. This is the founding thesis of the product, and it is a structural cost advantage over every "AI agent trades for you" competitor.
+
+## Objection 3: "Bots have no moat. Anyone can fork the code."
+
+The code is open. The moat is not the code — it is the **trust layer that only an on-chain venue makes possible**, and that no CEX-based bot (MetaTrader EAs, 3Commas-style services) can structurally copy:
+
+| Trust primitive | Autobots | CEX bot |
+|---|---|---|
+| Track record proven by transaction digests, not screenshots | ✅ on-chain | ❌ impossible |
+| Strategy source pinned publicly (Walrus) and reproducible in the backtester | ✅ | ❌ |
+| Market data from the venue's own fill-tape (DeepBook `OrderFilled` events), no data vendor in the critical path | ✅ shipped | ❌ |
+| Creator royalties enforced by a smart contract on every bot-opened trade | ✅ live | ❌ trust-based |
+| Hard risk limits enforceable by a Move contract the bot cannot exceed (roadmap) | ✅ possible | ❌ impossible |
+
+Forking the code copies none of these: the marketplace history, the on-chain fee flow to authors, and the verifiable records accrue to the network, not the repository.
+
+## Objection 4: "Where does revenue come from?"
+
+One simple, on-chain-enforced fee: **0.01 SUI every time a bot opens a trade** — half to the platform treasury, half to the author of the strategy in use, paid automatically by the `suirobo_factory` contract. Closing is free.
+
+This creates a supply-side flywheel rather than a custody business:
+
+1. Strategy authors publish to the marketplace (source on Walrus, results reproducible).
+2. Users run those strategies; every open pays the author on-chain.
+3. Earning authors publish more and better strategies; verified badges compound their reputation.
+4. More strategies attract more users — and every user is also new taker volume for DeepBook, which aligns the project with the exchange layer and the Sui ecosystem instead of competing with them.
+
+Revenue scales with **bot activity**, not with assets under custody, spreads, or subscription churn.
+
+## Objection 5: "Is anything actually built, or is this a deck?"
+
+Shipped and verifiable today:
+
+- **Mainnet-validated live trading**: swap-based DeepBook margin positions (long = borrow USDC → buy SUI; short = borrow SUI → sell), validated with real funds on Sui mainnet.
+- **Autobots Desktop v1.2.0** (portable Windows app): the full product — key entered locally and encrypted at rest (OS-level DPAPI), bot self-signs 24/7.
+- **A safety layer most retail bots never get**:
+  - *Chain-is-truth reconcile* — the bot verifies its own position against the MarginManager's real on-chain debt and drops stale phantoms.
+  - *Data-integrity watchdog* — entries pause automatically on stale market data; the agent rotates across three public Sui fullnodes on read failures.
+  - *Dead-man switch* — a crashed or hung agent auto-restarts and a running bot auto-resumes, reconciling with the chain first.
+  - Kill-switch, max-daily-loss circuit breaker, and a DeepBook liquidation guard on every position.
+- **A professional research bench**: MT5-class backtester on real historical data, a parameter Optimizer, a Robustness Lab (period stability + 1,000-run Monte-Carlo), and anchored walk-forward validation — so strategies are proven before a coin is at risk. Example results (backtests on real data, reproducible in-app): +12.0% over Jan–May 2026 on SUI M5; +45.9% over full-year 2025 on BTC M15.
+- **A Sui-native data spine**: OHLC candles built from DeepBook's own on-chain fill-tape and a live order-book-imbalance signal — the bot can run entirely off its own Sui RPC, with no CEX API in the decision loop.
+- **Live surfaces**: the web app at [autobots.wal.app](https://autobots.wal.app) (hosted on Walrus, resolved by SuiNS) for wallet-signed trading and onboarding; the desktop app as the flagship for 24/7 automation.
+
+Every claim above is checkable: the code is public, the contracts are on mainnet, and the releases are downloadable.
+
+## Objection 6: "Why Sui and DeepBook?"
+
+Because a trading bot needs three things a general-purpose chain rarely offers together: a **native central-limit order book** (DeepBook V3 with margin), **cheap fast transactions** (a 24/7 bot places thousands), and **verifiable public state** for the trust layer above. Sui has all three, plus Walrus for storage and Pyth for oracles.
+
+Strategically, bots are the kind of user a young order book wants most: they trade around the clock and generate consistent volume. Autobots grows **with** the DeepBook and Sui ecosystem, not against it.
+
+## Objection 7: "Retail users will never trust it enough to start."
+
+Onboarding is a trust ladder in which commitment is earned one step at a time:
+
+1. **Test a strategy** — a real backtest, no wallet, nothing at risk.
+2. **Trade from your own wallet** — manually or with the in-tab Web Bot; the user reviews and signs every single trade.
+3. **Go fully automatic** — download the desktop app; the key is entered once, locally, and never leaves the machine.
+
+At no step is the user asked to trust before they can verify, and at no step do we hold anything of theirs.
 
 ---
 
-## 2. Strength rooted in data discipline
-
-An automated trading system is only valuable when it speaks in real numbers, not momentary emotion. So Autobots is built on:
-
-- **Curated, rules-based strategies.** Our robots don't spray capital randomly — they apply strict, EA-style skill sets tuned for the on-chain environment.
-- **Battle-tested against history.** Before any strategy goes live, it is put through rigorous backtests against large historical datasets, month by month, on real market data.
-
-This preparation lets the robot execute precisely — optimizing win rate and controlling risk — at a running cost that is effectively zero.
-
----
-
-## 3. Absolute sovereignty: platform-hack resistant, your assets stay private
-
-In a decentralized world, security isn't a bonus feature — it's the root of survival. We hold crypto's highest principle sacred: *Not your keys, not your coins.*
-
-Autobots is designed fully non-custodial, guaranteeing total privacy and independence:
-
-- **It never leaves your machine.** Your private key and **your assets never leave your device.** Every calculation and every signature happens locally, on your own machine.
-- **Safer against platform hacks.** Your funds are far safer because **Autobots is only a tool provider, never a custodian.** We hold no keys and no coins. Even in the worst case — the platform's front end being attacked — **your assets remain completely intact and safe** on your device, simply because there is no central database of funds for an attacker to target.
-- **Private and independent.** Your trade logs, your proprietary strategies, and your wallet are yours alone. You are immune to central-server outages, third-party failures, and sudden policy changes. You hold 100% control of your own system.
-
----
-
-## 4. Surviving the bear market & a built-in creator economy
-
-The harsh reality of crypto is the "red season" — bear markets, when prices fall, volume dries up, and users thin out, largely because they lack a consistent method, lack tools, and can't afford the API bills to keep a bot alive.
-
-Autobots solves this pain with a reinforcing ecosystem:
-
-- **Ready-made audit flow & strategy templates.** We provide a standardized audit + backtest workflow and a library of strategy templates that AI agents have researched and optimized. Even when the market is grim, you have sharp tools to defend and hunt for opportunity — without paying a cent in API fees.
-- **A creator economy — share to prosper together.** The standout feature of Autobots is that it rewards community brainpower. If you research a profitable strategy on our system, you can **publish it directly on the platform.** When other users run your bot, **a creator fee is paid back to you, the author — automatically and on-chain (0.005 SUI for every position your bot opens).**
-
-This model turns the project into a durable, aligned whole: experienced traders monetize their insight, everyday users get a safe foundation, and a steady stream of organic trading volume keeps flowing into the DEX.
-
----
-
-## Conclusion: redefining smart, sustainable DEX trading
-
-Autobots doesn't just hand you another automated bot — it brings a **smart, sustainable mindset for on-chain finance.** By combining the analytical power of AI agents with the cost-efficient performance of robotics — while keeping your assets 100% safe on your own machine — we help you master the DEX, 24/7.
-
-The system runs efficiently, economically, with absolute security, and opens the door to uncapped passive income. Protect your assets and lead the future of smart trading — with **Autobots**.
-
----
-
-## 🚀 Roadmap
-
-**Shipped**
-
-- **Autobots Desktop app** — the full pro toolkit in a one-click portable app (Windows), bundling the local trading agent. Your key is entered locally and the bot self-signs 24/7. The desktop app is the product; the web app is wallet-signed trading (connect, trade, or run the in-browser Web Bot — you sign each trade).
-- **EA-style strategy engine** shared by backtest and live — closed-candle signals (no repaint), TP/SL/breakeven/trailing, risk-% sizing, session filters, multi-timeframe gates, cooldowns, and per-strategy AND-filters (ADX/RSI/Stoch/ATR%/MACD/SMA/EMA).
-- **Rigour tools** — a parameter **Optimizer** (sweep), a **Robustness Lab** (period stability + Monte-Carlo), and **anchored walk-forward** validation (in-sample optimise → out-of-sample test) so a strategy is proven before a coin is at risk.
-- **Hard safety interlocks** — kill-switch + max-daily-loss breaker, a DeepBook liquidation guard, and TP/SL on every position. Deterministic, never AI-gated.
-- **Sui-native data spine** — candles built from the **DeepBook on-chain fill-tape** (`OrderFilled` → OHLC) instead of a CEX REST feed, wired into both the Backtest Simulator and the live bot (opt-in). Plus a live **order-book imbalance** signal/entry filter. A self-custody bot can run entirely off its own Sui RPC.
-- **Verifiable track record** — on-chain, per-wallet bot results surfaced as marketplace trust badges.
+## Roadmap
 
 **Next**
 
-- **Move-enforced risk vault** — capability-typed authority (analyst / execute / lifecycle caps) so an automation can trade within hard, on-chain-enforced limits it can never exceed.
-- **DeepBook liquidator + cascade radar** — turn on-chain liquidation pressure into both a defensive guard and an opportunity signal.
-- **More indicators, more pairs, portfolio bots**, and a continuously expanding library of ready-made, battle-tested templates — all no-code.
+- **Maker-first execution** — enter with DeepBook limit orders instead of crossing the spread as a taker: the largest per-trade cost improvement available without touching strategy logic.
+- **Move-enforced risk vault** — position, leverage, and daily-loss limits enforced by an on-chain contract the bot cannot exceed: "trust-minimised" instead of "trust the software".
+- **DeepBook liquidation radar** — turn on-chain liquidation pressure into both a defensive guard and an opportunity signal.
+- **More instruments, portfolio bots, and a continuously expanding library** of battle-tested, no-code strategy templates.
 
-Our north star: turn strategy research into a fast, rigorous, no-code workflow — while keeping every Auto Bot self-custodial, verifiable, and cheap to run 24/7.
+**Shipped** — see [ROADMAP.md](./ROADMAP.md) for the full phase-by-phase record (12 completed phases, from the skill factory and on-chain fee contract through the v1.2.0 safety release).
 
 ---
 
@@ -102,9 +113,14 @@ Our north star: turn strategy research into a fast, rigorous, no-code workflow �
 | Spot & leveraged trading | **DeepBook V3** + **DeepBook Margin** (SUI/USDC) via `pool_proxy` |
 | Market data | **DeepBook on-chain fill-tape** (`OrderFilled` → OHLC) + L2 order-book imbalance — no CEX REST in the critical path |
 | Prices | **Pyth** oracle feeds |
-| Marketplace / creator fee | on-chain `suirobo_factory` contract (deterministic 0.005 SUI/open to the skill author) |
-| Hosting & storage | **Walrus** — frontend Site, bot-skill source, and agent memory (verifiable) |
+| Marketplace / creator fee | on-chain `suirobo_factory` contract (deterministic 0.005 SUI per open to the strategy author) |
+| Hosting & storage | **Walrus** — frontend site and strategy source (verifiable) |
 | Naming | **SuiNS** — `autobots.sui` |
-| Clients | **Autobots Desktop** (one-click portable app, bundles the local agent, 24/7 self-sign) **+** Walrus-hosted web app (wallet-signed: Manual + in-browser Web Bot) |
+| Clients | **Autobots Desktop** (portable app, 24/7 self-signing) + Walrus-hosted web app (wallet-signed) |
 
-**Live app:** [autobots.wal.app](https://autobots.wal.app)
+## Try it
+
+- **Web (nothing at risk):** open [autobots.wal.app](https://autobots.wal.app) and run a backtest — no wallet needed.
+- **Desktop (the product):** download the latest `Autobots-desktop` release, extract, run `Autobots.exe`, and verify the SHA-256 against `public/agent-manifest.json`.
+
+One fee, stated once: 0.01 SUI per bot-opened trade (half to the strategy author). Closing is free. Your keys never leave your machine.
