@@ -97,6 +97,11 @@ export interface LiveBotConfig {
   // SHORT only when OBI ≤ −t (t = this fraction, e.g. 0.10). 0/undefined → off.
   // Not back-testable (book depth isn't in OHLC), so live-only.
   obiFilter?:           number;
+  // ── P4-R3: maker-first entries (SUI/USDC direct mode only, default off) ──
+  // Rest a POST_ONLY limit at the touch instead of crossing the spread as a
+  // taker; after makerWaitSec unfilled, cancel and market only the remainder.
+  makerFirst?:          boolean;
+  makerWaitSec?:        number;
   // ── Bot skill author wallet (receives the 0.005 SUI author share per OPEN) ──
   // No randomness — fee always goes to the author of the skill currently in use.
   // Omit / empty string → fee is skipped entirely (e.g. self-built unpublished skill).
@@ -609,6 +614,136 @@ async function injectPythUpdate(tx: Transaction): Promise<void> {
   await pythClient.updatePriceFeeds(tx, updates, feeds);
 }
 
+// ─── P4-R3: maker-first entry ────────────────────────────────────────────────
+// A taker entry pays the taker fee AND crosses the spread on every open — the
+// silent edge-killer for a high-frequency bot. Maker-first instead rests a
+// POST_ONLY limit at the touch (LONG joins the best bid, SHORT the best ask),
+// waits a bounded time for a fill, then cancels and markets only the remainder.
+//   tx1: Pyth + borrow + POST_ONLY limit (+ open fee) — atomic; POST_ONLY means
+//        a crossing race aborts the whole tx and the caller falls back to the
+//        proven market path, so we can never accidentally take.
+//   fill detection: the manager's baseAsset delta (LONG: +filled; SHORT: borrow
+//        adds qty then sells reduce it → filled = qty − Δ). No order-id needed.
+//   tx2 (on timeout): cancelAllOrders + market the remainder (≥ 1-SUI lot), or
+//        repay the borrow to unwind cleanly when effectively nothing filled.
+// Returns null when the book can't be read (caller uses the market path).
+async function makerFirstOpen(
+  dbClient: any,
+  managerKey: string,
+  keypair: Ed25519Keypair,
+  type: 'LONG' | 'SHORT',
+  qty: number,
+  estPrice: number,
+  skillAuthor: string | undefined,
+  waitSec: number,
+): Promise<{ digest: string; qty: number; fillPrice: number } | null> {
+  const address = keypair.toSuiAddress();
+
+  // Touch prices from the live book.
+  const lvl: any = await dbClient.getLevel2TicksFromMid('SUI_USDC', 1);
+  const bestBid = Number(lvl?.bid_prices?.[0]) || 0;
+  const bestAsk = Number(lvl?.ask_prices?.[0]) || 0;
+  if (!(bestBid > 0 && bestAsk > bestBid)) return null;
+  const makerPrice = type === 'LONG' ? bestBid : bestAsk;
+
+  // Baseline for asset-delta fill detection.
+  const base0 = Number((await dbClient.getMarginManagerAssets(managerKey)).baseAsset) || 0;
+
+  // tx1 — borrow + resting POST_ONLY limit at the touch (atomic with the fee).
+  const tx = new Transaction();
+  tx.setSender(address);
+  await injectPythUpdate(tx);
+  const cid = Date.now().toString();
+  if (type === 'LONG') {
+    // 2% buffer so a later market fallback at a worse price is still funded;
+    // any excess borrowed USDC sits as a manager asset and is cleared by the
+    // full-debt repay on close (the proven directClose pattern).
+    dbClient.marginManager.borrowQuote(managerKey, qty * makerPrice * 1.02)(tx);
+  } else {
+    dbClient.marginManager.borrowBase(managerKey, qty)(tx);
+  }
+  dbClient.poolProxy.placeLimitOrder({
+    poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid,
+    price: makerPrice, quantity: qty, isBid: type === 'LONG',
+    orderType: 3 /* POST_ONLY */, payWithDeep: false,
+  })(tx);
+  if (skillAuthor) injectBotOpenFee(tx, [skillAuthor]);
+  const digest = await signAndBroadcast(tx, keypair);   // POST_ONLY cross → throws → caller falls back
+  addLog('info', `⚡ Maker entry: ${type} limit ${qty} SUI @ $${makerPrice.toFixed(4)} resting — waiting ≤${waitSec}s for a fill…`);
+
+  // Poll the fill via the manager's base-asset delta.
+  const t0 = Date.now();
+  let filled = 0;
+  while (Date.now() - t0 < waitSec * 1000) {
+    await new Promise(r => setTimeout(r, 5_000));
+    try {
+      const baseNow = Number((await dbClient.getMarginManagerAssets(managerKey)).baseAsset) || 0;
+      const delta = baseNow - base0;
+      filled = type === 'LONG' ? delta : qty - delta;
+      filled = Math.max(0, Math.min(qty, filled));
+      if (filled >= qty - 0.05) {
+        addLog('trade', `⚡ Maker fill complete: ${qty} SUI @ $${makerPrice.toFixed(4)} — spread + taker fee saved.`);
+        return { digest, qty, fillPrice: makerPrice };
+      }
+    } catch { /* transient read — keep waiting */ }
+  }
+
+  // Timeout — cancel the rest, then market the remainder (or unwind the borrow).
+  // ⚠️ From here on tx1 HAS EXECUTED (borrow + fee + resting order live). If the
+  // cleanup tx fails we must NEVER fall back to the plain market path — that
+  // would borrow and pay the fee a second time while the limit still rests.
+  const buildCleanup = async () => {
+    const remaining = Math.round((qty - filled) * 10) / 10;
+    const tx2 = new Transaction();
+    tx2.setSender(address);
+    await injectPythUpdate(tx2);
+    dbClient.poolProxy.cancelAllOrders(managerKey)(tx2);
+    let marketed = 0;
+    if (remaining >= 1) {
+      // DeepBook's 1-SUI minimum lot: only a ≥1 SUI remainder can be marketed.
+      marketed = lotSafe(remaining);
+      dbClient.poolProxy.placeMarketOrder({
+        poolKey: 'SUI_USDC', marginManagerKey: managerKey, clientOrderId: cid + 'f',
+        quantity: marketed, isBid: type === 'LONG', payWithDeep: false,
+      })(tx2);
+    } else if (filled < 0.1) {
+      // Effectively nothing filled and the remainder is below the minimum lot:
+      // repay the borrow so the attempt unwinds to flat (only the fee was spent).
+      if (type === 'LONG') dbClient.marginManager.repayQuote(managerKey, undefined as any)(tx2);
+      else                 dbClient.marginManager.repayBase(managerKey, undefined as any)(tx2);
+    }
+    return { tx2, marketed };
+  };
+  let digest2: string, marketed = 0;
+  try {
+    const c = await buildCleanup();
+    marketed = c.marketed;
+    digest2 = await signAndBroadcast(c.tx2, keypair);
+  } catch (e1: any) {
+    // One retry (fresh Pyth data + fresh fill snapshot), then give up WITHOUT fallback.
+    await new Promise(r => setTimeout(r, 3_000));
+    try {
+      const baseNow = Number((await dbClient.getMarginManagerAssets(managerKey)).baseAsset) || 0;
+      const delta = baseNow - base0;
+      filled = Math.max(0, Math.min(qty, type === 'LONG' ? delta : qty - delta));
+    } catch { /* keep last snapshot */ }
+    try {
+      const c = await buildCleanup();
+      marketed = c.marketed;
+      digest2 = await signAndBroadcast(c.tx2, keypair);
+    } catch (e2: any) {
+      throw new Error(`maker cleanup failed after the resting order (NOT falling back — check the margin account manually): ${String(e2?.message || e2).slice(0, 140)}`);
+    }
+  }
+  const totalQty = Math.round((filled + marketed) * 10) / 10;
+  if (totalQty < 0.1) {
+    throw new Error('maker entry expired unfilled — borrow unwound, no position opened');
+  }
+  const fillPrice = (filled * makerPrice + marketed * estPrice) / (filled + marketed);
+  addLog('trade', `⚡ Maker entry done: ${filled} SUI @ $${makerPrice.toFixed(4)} maker${marketed > 0 ? ` + ${marketed} SUI market` : ''} (avg $${fillPrice.toFixed(4)}).`, fillPrice, undefined, digest2);
+  return { digest: digest2, qty: totalQty, fillPrice };
+}
+
 // Open a REAL directional leveraged position via DeepBook Margin (same proven
 // path as ManualTradeView's margin order): the borrow alone is net-neutral, so
 // we borrow AND swap in one atomic tx to create actual exposure.
@@ -623,7 +758,9 @@ async function directOpen(
   sizeBase: number,
   price: number,
   skillAuthor?: string,
-): Promise<{ digest: string; qty: number }> {
+  makerFirst = false,
+  makerWaitSec = 45,
+): Promise<{ digest: string; qty: number; fillPrice?: number }> {
   const address = keypair.toSuiAddress();
   const { dbClient, managerKey } = await getDbClientWithManager(address);
 
@@ -640,6 +777,24 @@ async function directOpen(
   }
   const maxQty = Math.floor(collateralSui * 0.9 * 10) / 10;     // ≤ ~0.9x leverage
   const qty = Math.min(lotSafe(sizeBase), Math.max(1, maxQty)); // ≥ 1-SUI lot
+
+  // P4-R3: try the maker-first path (opt-in). Any failure — unreadable book,
+  // POST_ONLY crossing race, RPC error — falls back to the proven taker path.
+  if (makerFirst) {
+    try {
+      const r = await makerFirstOpen(dbClient, managerKey, keypair, type, qty, price, skillAuthor, makerWaitSec);
+      if (r) return r;
+      addLog('info', '⚡ Maker entry skipped (order book unreadable) — using a market order.');
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      // Two cases must NEVER fall back to the market path:
+      //  - "unwound": tx1 executed then expired unfilled and was cleanly repaid;
+      //  - "NOT falling back": tx1 executed but the cleanup tx failed — a second
+      //    borrow+fee on top of a possibly-live resting order would double up.
+      if (msg.includes('unwound') || msg.includes('NOT falling back')) throw e;
+      addLog('warning', `⚡ Maker entry failed (${msg.slice(0, 120)}) — falling back to a market order.`);
+    }
+  }
 
   const tx = new Transaction();
   tx.setSender(address);
@@ -912,6 +1067,7 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
       let digest: string;
       let posBorrowAsset = borrowAsset;
       let posBorrowAmt   = borrowAmt;
+      let entryFill      = price;   // actual fill price (maker-first may beat the signal price)
 
       if (isXbtcPair(cfg.pair)) {
         // xBTC/USDC → DeepTrade spot market order, server-signed
@@ -929,18 +1085,20 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
         // directOpen caps the size to the manager's collateral and returns the exact
         // SUI quantity it traded — store THAT so directClose sells back the same and
         // PnL is measured on the real exposure.
-        addLog('info', `⚙️ [DIRECT] Open ${type} ~${lotSafe(borrowSUI)} SUI — ${type === 'LONG' ? 'borrow USDC → buy SUI' : 'borrow SUI → sell SUI'}...`);
-        const opened = await directOpen(keypair, type, borrowSUI, price, cfg.skillAuthor);
+        addLog('info', `⚙️ [DIRECT] Open ${type} ~${lotSafe(borrowSUI)} SUI — ${type === 'LONG' ? 'borrow USDC → buy SUI' : 'borrow SUI → sell SUI'}${cfg.makerFirst ? ' (maker-first)' : ''}...`);
+        const opened = await directOpen(keypair, type, borrowSUI, price, cfg.skillAuthor,
+          cfg.makerFirst === true, cfg.makerWaitSec || 45);
         digest = opened.digest;
         posBorrowAsset = base;
         posBorrowAmt   = opened.qty;
+        if (opened.fillPrice && opened.fillPrice > 0) entryFill = opened.fillPrice;   // maker fill ≠ signal price
         if (opened.qty < lotSafe(borrowSUI)) addLog('info', `ℹ️ Size capped to ${opened.qty} SUI by available collateral (≤0.9x).`);
       }
 
       state.position = {
-        type, entryPrice: price, entryTime: new Date().toISOString(),
+        type, entryPrice: entryFill, entryTime: new Date().toISOString(),
         tpPrice, slPrice,
-        trailPeak: price, borrowAsset: posBorrowAsset, borrowAmount: posBorrowAmt,
+        trailPeak: entryFill, borrowAsset: posBorrowAsset, borrowAmount: posBorrowAmt,
         unrealizedPnl: 0, unrealizedPct: 0,
       };
       state.tradeCount++;
@@ -1401,6 +1559,24 @@ const TF_INTERVALS: Record<string, number> = {
 
 export const liveBotController = {
   configure(cfg: LiveBotConfig) {
+    // ── P4-R5 config guardrails: clamp fat-fingered values BEFORE they trade. ──
+    // Every clamp is logged so the user sees what changed and why.
+    const clamp = (label: string, v: number | undefined, lo: number, hi: number): number | undefined => {
+      if (v === undefined || v === null || Number.isNaN(v)) return undefined;
+      const c = Math.min(hi, Math.max(lo, v));
+      if (c !== v) addLog('warning', `🛡 Guardrail: ${label} ${v} → ${c} (allowed ${lo}–${hi}).`);
+      return c;
+    };
+    cfg.leverage        = clamp('leverage', cfg.leverage, 1, 5) ?? cfg.leverage;
+    cfg.stopLossPct     = clamp('stop-loss %', cfg.stopLossPct, 0.2, 50) ?? cfg.stopLossPct;
+    cfg.takeProfitPct   = clamp('take-profit %', cfg.takeProfitPct, 0.1, 100) ?? cfg.takeProfitPct;
+    cfg.maxDailyLossPct = clamp('max daily loss %', cfg.maxDailyLossPct, 0, 50) ?? cfg.maxDailyLossPct;
+    cfg.makerWaitSec    = clamp('maker wait (s)', cfg.makerWaitSec, 10, 300) ?? cfg.makerWaitSec;
+    if (!TF_INTERVALS[cfg.timeframe]) {
+      addLog('warning', `🛡 Guardrail: unsupported timeframe "${cfg.timeframe}" → "15m".`);
+      cfg.timeframe = '15m';
+    }
+
     // ⚠️ Tách privateKey ra, lưu riêng trong memory
     const { privateKey, ...safeCfg } = cfg;
     if (privateKey) {

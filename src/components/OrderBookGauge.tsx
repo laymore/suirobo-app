@@ -19,7 +19,8 @@ const Cell: React.FC<{ label: string; value: string; color?: string }> = ({ labe
 const OrderBookGauge: React.FC<{
   filterOn?: boolean; onToggleFilter?: () => void;
   candlesOn?: boolean; onToggleCandles?: () => void;
-}> = ({ filterOn, onToggleFilter, candlesOn, onToggleCandles }) => {
+  makerOn?: boolean; onToggleMaker?: () => void;
+}> = ({ filterOn, onToggleFilter, candlesOn, onToggleCandles, makerOn, onToggleMaker }) => {
   const { book } = useOrderBook();
   if (!book) return null;
 
@@ -42,6 +43,18 @@ const OrderBookGauge: React.FC<{
             background: `${lean.c}1a`, color: lean.c, border: `1px solid ${lean.c}55`,
           }}>{lean.txt} · OBI {obiPct >= 0 ? '+' : ''}{obiPct}%</span>
           <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {onToggleMaker && (
+              <button onClick={onToggleMaker}
+                title="When on (SUI/USDC only), entries rest a limit order at the best bid/ask instead of crossing the spread as a taker. Unfilled after ~45s, the rest is cancelled and only the remainder is market-ordered. Saves the spread + taker fee on most entries."
+                style={{
+                  fontSize: '0.58rem', fontWeight: 700, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
+                  background: makerOn ? 'rgba(43,217,167,0.12)' : 'transparent',
+                  border: `1px solid ${makerOn ? '#2BD9A7' : '#334155'}`,
+                  color: makerOn ? '#2BD9A7' : '#64748b',
+                }}>
+                {makerOn ? '✓ Maker entries ON' : '⚡ Maker entries'}
+              </button>
+            )}
             {onToggleCandles && (
               <button onClick={onToggleCandles}
                 title="When on (SUI/USDC only), the bot builds its candles from the DeepBook on-chain fill-tape instead of Binance — no CEX REST in the live path. Bootstraps on start, then accumulates new fills each tick."
