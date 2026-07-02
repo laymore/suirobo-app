@@ -1373,6 +1373,12 @@ export const BacktestSimulator: React.FC<Props> = ({ preloadedBotSkill }) => {
                 <StatCard label="Trading fee" color="#64748b"
                   value={`-$${s.totalCommission}`} sub={`${s.longTrades}L ${s.shortTrades}S`} />
               </div>
+              {/* Honest-model disclosure: where this simulation differs from live DeepBook */}
+              <div style={{ margin: '8px 12px 0', padding: '7px 10px', borderRadius: 8, background: '#0a0f1d', border: '1px solid #1e293b', fontSize: '0.66rem', color: '#64748b', lineHeight: 1.5 }}>
+                ⓘ Simulation model: liquidation uses a leverage-based estimate (live trading uses DeepBook's real
+                margin health, guarded on-chain); fees are a flat commission both ways, and liquidation penalties
+                are not modeled. Live results also pay the 0.01 SUI per-open bot fee.
+              </div>
             </div>
           )}
 

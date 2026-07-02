@@ -716,7 +716,8 @@ function computeStats(
   if (returns.length > 1) {
     const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
     const std  = Math.sqrt(returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length);
-    sharpe = std > 0 ? (mean / std) * Math.sqrt(252) : 0;
+    // Crypto trades 24/7/365 — annualise with 365, not the 252 stock-market days.
+    sharpe = std > 0 ? (mean / std) * Math.sqrt(365) : 0;
   }
 
   const winRate  = (wins.length / n) * 100;

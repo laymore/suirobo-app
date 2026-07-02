@@ -76,6 +76,13 @@ module suirobo_contracts::suirobo_factory {
         new_price: u64,
     }
 
+    /// On-chain transparency: every admin treasury withdrawal is public.
+    public struct TreasuryWithdrawn has copy, drop {
+        admin: address,
+        amount: u64,
+        remaining: u64,
+    }
+
     // --- Initialization ---
     fun init(ctx: &mut TxContext) {
         let admin_cap = AdminCap {
@@ -253,6 +260,11 @@ module suirobo_contracts::suirobo_factory {
     ) {
         let withdrawn = balance::split(&mut marketplace.treasury, amount);
         let coin = coin::from_balance(withdrawn, ctx);
+        event::emit(TreasuryWithdrawn {
+            admin: tx_context::sender(ctx),
+            amount,
+            remaining: balance::value(&marketplace.treasury),
+        });
         transfer::public_transfer(coin, tx_context::sender(ctx));
     }
 

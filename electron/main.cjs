@@ -197,11 +197,14 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({
     width: 1440, height: 920, minWidth: 1100, minHeight: 700,
     backgroundColor: '#060e1e',
-    title: 'Suirobo — Trade & Backtest',
+    title: 'Autobots — Trade & Backtest',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // DevTools stay available in dev, but are disabled in the packaged app so
+      // users can't be social-engineered into pasting scripts into the console.
+      devTools: !PACKAGED,
     },
   });
   win.removeMenu();
