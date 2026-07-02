@@ -49,7 +49,7 @@ export const en = {
       factory:   'Autobots Factory',
       manual:    'Manual Trade',
       backtest:  'Backtest Simulator',
-      livetrade: 'Live Trade 24/7',
+      livetrade: 'Live Trade',
     },
   },
 

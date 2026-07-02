@@ -36,9 +36,27 @@ export default function App() {
   const userConfig = useUserConfig();
   const [showSetup, setShowSetup] = useState(false);
   // Live Trade tier ladder (increasing automation): 'manual' (you sign each) →
-  // 'web' (no-install bot, you sign) → 'agent' (downloaded Client Bot, auto-sign 24/7).
-  // The 4th rung — AI Agent (auto) — lives in the AI Assistant view, reached via the switch.
-  const [liveTier, setLiveTier] = useState<'manual' | 'web' | 'agent'>(IS_DESKTOP ? 'agent' : 'web');
+  // 'web' (no-install bot, you sign) → 'agent' (Client Bot = desktop-download landing).
+  // On the web the choice persists; a first visit shows a plain-language chooser
+  // instead of dropping a new user into a preconfigured bot panel.
+  const TIER_LS_KEY = 'autobots_live_tier';
+  const [liveTier, setLiveTierRaw] = useState<'manual' | 'web' | 'agent'>(() => {
+    if (IS_DESKTOP) return 'agent';
+    try {
+      const saved = localStorage.getItem(TIER_LS_KEY);
+      if (saved === 'manual' || saved === 'web' || saved === 'agent') return saved;
+    } catch { /* ignore */ }
+    return 'web';
+  });
+  const [tierChosen, setTierChosen] = useState<boolean>(() => {
+    if (IS_DESKTOP) return true;
+    try { return !!localStorage.getItem(TIER_LS_KEY); } catch { return false; }
+  });
+  const setLiveTier = useCallback((t: 'manual' | 'web' | 'agent') => {
+    setLiveTierRaw(t);
+    setTierChosen(true);
+    try { localStorage.setItem(TIER_LS_KEY, t); } catch { /* ignore */ }
+  }, []);
   const { t } = useI18n();
 
   // Setup / API key is a DESKTOP-only concern. On the web you just connect your
@@ -305,7 +323,51 @@ export default function App() {
               <BacktestSimulator preloadedBotSkill={pendingBotSkill} />
             </div>
           )}
-          {currentView === 'livetrade' && (
+          {currentView === 'livetrade' && !IS_DESKTOP && !tierChosen && (
+            <div style={{ padding: 24, maxWidth: 760, margin: '0 auto' }}>
+              {/* First visit: ask in plain language instead of dropping the user
+                  into a preconfigured bot panel. The answer persists. */}
+              <h2 style={{ fontFamily: "'Space Grotesk', Inter, sans-serif", color: '#fff', fontWeight: 600, fontSize: '1.5rem', margin: '18px 0 6px' }}>
+                How do you want to trade?
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: 20 }}>
+                You can switch at any time. Whatever you pick, nothing trades without your approval.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {([
+                  { id: 'manual' as const, icon: '✍️', title: 'By myself', badge: '',
+                    desc: 'You place and sign every trade by hand. Full control, nothing automated.' },
+                  { id: 'web' as const, icon: '🌐', title: 'Bot suggests, I approve', badge: 'Good first step',
+                    desc: 'A strategy watches the market in this tab and proposes trades. You review and sign each one with your wallet.' },
+                  { id: 'agent' as const, icon: '💻', title: 'Fully automatic, 24/7', badge: '',
+                    desc: 'The free desktop app runs the bot and signs by itself. Your key stays on your machine.' },
+                ]).map(o => (
+                  <button key={o.id} onClick={() => setLiveTier(o.id)}
+                    style={{
+                      textAlign: 'left', cursor: 'pointer', display: 'flex', gap: 14, alignItems: 'flex-start',
+                      background: '#0a0f1d', border: '1px solid #1e293b', borderRadius: 12, padding: '16px 18px',
+                      transition: 'border-color 0.15s',
+                    }}
+                    onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--sui-blue)'; }}
+                    onMouseOut={e => { e.currentTarget.style.borderColor = '#1e293b'; }}>
+                    <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>{o.icon}</span>
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>{o.title}</span>
+                        {o.badge && (
+                          <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: 'rgba(43,217,167,0.12)', color: 'var(--profit)' }}>
+                            {o.badge}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.5 }}>{o.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {currentView === 'livetrade' && (IS_DESKTOP || tierChosen) && (
             <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
               {/* 3-rung automation ladder (web). Manual / Web Bot trade in-browser
                   (you sign); Client Bot introduces the full desktop app (auto-sign

@@ -466,10 +466,13 @@ export const WebBotPanel: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Self-custody banner */}
         <div style={{ ...card, borderColor: 'rgba(0,212,255,0.3)', background: 'rgba(0,212,255,0.05)' }}>
-          <div style={{ fontWeight: 800, color: '#00d4ff', fontSize: '0.9rem', marginBottom: 4 }}>🌐 Web Bot — No Install, Self-Custody</div>
+          <div style={{ fontWeight: 800, color: '#00d4ff', fontSize: '0.9rem', marginBottom: 4 }}>🌐 Web Bot: no install, self-custody</div>
           <div style={{ color: '#94a3b8', fontSize: '0.74rem', lineHeight: 1.5 }}>
-            Runs in this tab. On every signal you sign with your own wallet — your key never leaves it.
-            Keep the tab open (hidden is fine). For hands-off 24/7 trading, download the Agent.
+            The strategy watches the market and suggests trades; <strong style={{ color: '#cbd5e1' }}>you approve and sign each one</strong> with
+            your own wallet, so your key never leaves it.
+          </div>
+          <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: '#fbbf24', fontSize: '0.72rem', lineHeight: 1.5 }}>
+            Runs only while this tab stays open (hidden is fine). For true 24/7 with automatic signing, use the desktop app.
           </div>
         </div>
 
@@ -503,6 +506,7 @@ export const WebBotPanel: React.FC = () => {
 
           <div style={{ marginTop:12 }}>
             <label style={{ color:'#64748b', fontSize:'0.7rem', fontWeight:700, textTransform:'uppercase' }}>Capital (SUI)</label>
+            <div style={{ color:'#475569', fontSize:'0.66rem', marginTop:2 }}>How much SUI the bot commits per position.</div>
             <input type="number" min={0.1} step={0.1} value={capitalSUI} disabled={running}
               onChange={e => setCapitalSUI(Math.max(0.1, +e.target.value || 0.1))} style={{ ...inp, marginTop:6 }} />
             {sizePreview && (
@@ -515,7 +519,12 @@ export const WebBotPanel: React.FC = () => {
           {/* Prerequisite status + one-time setup (self-serve — no Client Mode needed) */}
           <div style={{ marginTop:12, padding:'10px 12px', borderRadius:8, background:'#0a0f1d', border:'1px solid #1e293b' }}>
             {!account?.address ? (
-              <span style={{ color:'#f59e0b', fontSize:'0.74rem' }}>⚠ Connect your wallet to trade.</span>
+              <div style={{ color:'#f59e0b', fontSize:'0.74rem', lineHeight:1.6 }}>
+                To trade you need:
+                <div style={{ color:'#94a3b8' }}>1. Your Sui wallet connected (button top right)</div>
+                <div style={{ color:'#94a3b8' }}>2. A little SUI in it for gas (~0.1 SUI)</div>
+                <div style={{ color:'#94a3b8' }}>3. USDC to trade with (10 USDC is enough to start)</div>
+              </div>
             ) : isXbtc(pair) ? (
               dtBalanceManager && dtFeeManager ? (
                 <span style={{ color:'#22c55e', fontSize:'0.74rem' }}>✓ DeepTrade account ready. Make sure your wallet holds USDC (to buy) / xBTC (to sell).</span>

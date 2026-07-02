@@ -49,7 +49,7 @@ export const vi = {
       factory:   'Xưởng Kỹ Năng',
       manual:    'Trading Thủ Công',
       backtest:  'Giả Lập Backtest',
-      livetrade: 'Live Trade 24/7',
+      livetrade: 'Live Trade',
     },
   },
 

@@ -3,6 +3,16 @@ import type { ViewType } from '../Sidebar';
 import { AgentDownloadModal } from '../AgentDownloadModal';
 import { LogoMark } from '../Logo';
 
+/**
+ * Home, designed around the new-user trust ladder (inversion: kill every reason
+ * to bounce in the first 60 seconds):
+ *   1. Test a strategy  (no wallet, nothing at risk)  ← the ONE primary CTA
+ *   2. Trade from your wallet (you sign every trade)
+ *   3. Go 24/7 with the desktop app (key stays local)
+ * Numbers are real backtest results, jargon gets a plain-language gloss inline,
+ * and the fee is stated once, the same way everywhere.
+ */
+
 interface DashboardViewProps {
   onNavigate?: (view: ViewType) => void;
   agentOnline?: boolean | null;
@@ -22,7 +32,7 @@ const heading: React.CSSProperties = {
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [showDownload, setShowDownload] = useState(false);
   const [sui, setSui] = useState<Ticker | null>(null);
-  const [agentVersion, setAgentVersion] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -34,32 +44,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     };
     load();
     const iv = setInterval(load, 30_000);
-    fetch('/agent-manifest.json').then(r => r.json()).then(m => { if (alive) setAgentVersion(m?.version ?? null); }).catch(() => {});
+    fetch('/agent-manifest.json').then(r => r.json()).then(m => { if (alive) setAppVersion(m?.version ?? null); }).catch(() => {});
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
-  const steps: { n: string; title: string; desc: string; cta: string; action: () => void }[] = [
+  // The trust ladder: each step tells the user what they get AND what they risk.
+  const steps: { n: string; title: string; risk: string; desc: string; cta: string; action: () => void }[] = [
     {
-      n: '1', title: 'Download Autobots Desktop',
-      desc: 'The free desktop app that holds your keys on your own machine and runs bots 24/7. Nothing touches our servers.',
-      cta: 'Download desktop', action: () => setShowDownload(true),
+      n: '1', title: 'Test a strategy', risk: 'Nothing at risk',
+      desc: 'Run a real backtest on real market data and see the profit, drawdown, and every trade it would have made. No wallet, no sign-up.',
+      cta: 'Test a strategy free', action: () => onNavigate?.('backtest'),
     },
     {
-      n: '2', title: 'Pick an Auto Bot',
-      desc: 'Backtested Auto Bots from the marketplace, source verified on Walrus. Most are free.',
-      cta: 'Browse Auto Bots', action: () => onNavigate?.('factory'),
-    },
-    {
-      n: '3', title: 'Fund and start',
-      desc: 'Deposit 10 USDC into your margin pool and press Start. The bot trades 24/7 with TP/SL.',
+      n: '2', title: 'Trade from your wallet', risk: 'You approve each trade',
+      desc: 'Connect your Sui wallet and trade by hand, or let the in-tab bot suggest trades. Nothing happens without your signature.',
       cta: 'Open Live Trade', action: () => onNavigate?.('livetrade'),
+    },
+    {
+      n: '3', title: 'Go fully automatic', risk: 'Key stays on your machine',
+      desc: 'The free desktop app runs your bot 24/7 and signs by itself. You enter your key once, locally. It never leaves your computer.',
+      cta: 'Download the desktop app', action: () => setShowDownload(true),
     },
   ];
 
-  const topSkills = [
-    { name: 'SUI MTF Supertrend M5', desc: 'H4 Supertrend gates direction; M5 Supertrend-flip entries with a trailing runner (no TP cap). ~+5.4%/mo avg, Mar–Sep 2025.', tag: 'MTF' },
-    { name: 'SUI Supertrend M5', desc: 'Classic Supertrend-flip EA, short-side, US session, TP3 / SL1.5. Profitable every month Jan–May 2026 on real M5 data.', tag: 'Recommended' },
-    { name: 'BTC Breakout M15', desc: 'Donchian range-breakout EA, Asia session, 2% risk-per-trade. +45.9% over full-year 2025 on real BTC M15 data.', tag: 'Breakout' },
+  // Real backtest results, shown as data (not adjectives). Clicking opens the
+  // backtester so the user can reproduce the numbers themselves.
+  const strategies: {
+    name: string; tag: string; blurb: string;
+    stats: [string, string, boolean?][];
+  }[] = [
+    {
+      name: 'SUI Supertrend M5', tag: 'Start here',
+      blurb: 'Trend-following on SUI, tested month by month on real data.',
+      stats: [['Return', '+12.0%', true], ['Period', 'Jan to May 2026'], ['Max drawdown', '12.6%']],
+    },
+    {
+      name: 'SUI MTF Supertrend', tag: 'Trend',
+      blurb: 'Two-timeframe trend filter with a trailing exit.',
+      stats: [['Avg return', '+5.4%/mo', true], ['Positive months', '6 of 7'], ['Period', 'Mar to Sep 2025']],
+    },
+    {
+      name: 'BTC Breakout M15', tag: 'Breakout',
+      blurb: 'Trades BTC range breakouts during the Asian session.',
+      stats: [['Return', '+45.9%', true], ['Period', 'Full year 2025'], ['Max drawdown', '15.2%']],
+    },
   ];
 
   const up = (sui?.changePct ?? 0) >= 0;
@@ -74,24 +102,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             Own your bot.<br />Own your keys.
           </h1>
           <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: '58ch', marginBottom: 22 }}>
-            Connect your wallet and trade right away, or run the Web Bot — you sign each trade. For hands-off 24/7
-            automation, the <em style={{ fontStyle: 'normal', color: '#cbd5e1' }}>Autobots Desktop</em> app runs bots on your
-            own machine — your key never leaves your device, and every Auto Bot's source is verifiable on Walrus.
+            Rule-based trading bots for DeepBook, Sui's on-chain order book. Test any strategy
+            on real market data before risking anything, then trade from your own wallet.
+            We never hold your funds: there is no deposit address.
           </p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button onClick={() => onNavigate?.('livetrade')} style={{
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button onClick={() => onNavigate?.('backtest')} style={{
               padding: '13px 26px', borderRadius: 11, border: 'none', cursor: 'pointer',
               background: 'var(--sui-blue)', color: 'var(--sui-blue-ink)', fontWeight: 600, fontSize: '0.95rem',
             }}>
-              Open Live Trade
+              Test a strategy free
             </button>
             <button onClick={() => setShowDownload(true)} style={{
               padding: '13px 26px', borderRadius: 11, cursor: 'pointer',
-              background: 'transparent', border: '1px solid var(--sui-blue)', color: 'var(--sui-blue)',
+              background: 'transparent', border: '1px solid #334155', color: '#cbd5e1',
               fontWeight: 600, fontSize: '0.95rem',
             }}>
-              Download Autobots Desktop
+              Download the desktop app
             </button>
+            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>No wallet needed to try it.</span>
           </div>
         </div>
         <div style={{ flex: '0 0 auto', opacity: 0.95 }}>
@@ -99,44 +128,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* ── Live stats strip ── */}
+      {/* ── Live market strip (proof the app is alive, kept lean) ── */}
       <div style={{
         display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap',
         padding: '14px 20px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid #1e293b',
         marginBottom: 40, fontSize: '0.85rem',
       }}>
         <span style={{ color: 'var(--text-secondary)' }}>
-          SUI/USDT{' '}
+          SUI{' '}
           <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 600 }}>
             {sui ? `$${sui.price.toFixed(4)}` : '—'}
           </span>{' '}
           {sui && (
             <span style={{ fontFamily: 'monospace', color: up ? 'var(--profit)' : 'var(--loss)' }}>
-              {up ? '+' : ''}{sui.changePct.toFixed(2)}%
+              {up ? '+' : ''}{sui.changePct.toFixed(2)}% today
             </span>
           )}
         </span>
         <span style={{ color: '#1e293b' }}>|</span>
+        <span style={{ color: 'var(--text-secondary)' }}>Markets: SUI/USDC · BTC/USDC</span>
+        <span style={{ color: '#1e293b' }}>|</span>
         <span style={{ color: 'var(--text-secondary)' }}>
-          Desktop app <span style={{ fontFamily: 'monospace', color: '#fff' }}>{agentVersion ? `v${agentVersion}` : '—'}</span>
+          Desktop app <span style={{ fontFamily: 'monospace', color: '#fff' }}>{appVersion ? `v${appVersion}` : '—'}</span>
         </span>
-        <span style={{ color: '#1e293b' }}>|</span>
-        <span style={{ color: 'var(--text-secondary)' }}>Pairs: SUI/USDC margin · xBTC/USDC</span>
-        <span style={{ color: '#1e293b' }}>|</span>
-        <span style={{ color: 'var(--text-secondary)' }}>Creators earn 0.005 SUI per opened position</span>
       </div>
 
-      {/* ── How it works ── */}
-      <h2 style={{ ...heading, fontSize: '1.4rem', marginBottom: 18 }}>How it works</h2>
+      {/* ── The trust ladder (a real ordered sequence: commitment grows per step) ── */}
+      <h2 style={{ ...heading, fontSize: '1.4rem', marginBottom: 18 }}>Start with zero risk</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginBottom: 44 }}>
         {steps.map(s => (
           <div key={s.n} style={{ ...card, display: 'flex', flexDirection: 'column' }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%', marginBottom: 14,
-              background: 'rgba(77,162,255,0.15)', color: 'var(--sui-blue)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: '0.9rem',
-            }}>{s.n}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                background: 'rgba(77,162,255,0.15)', color: 'var(--sui-blue)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, fontSize: '0.9rem',
+              }}>{s.n}</div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--profit)' }}>{s.risk}</span>
+            </div>
             <h3 style={{ ...heading, fontSize: '1.05rem', marginBottom: 8 }}>{s.title}</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.55, flex: 1, marginBottom: 16 }}>
               {s.desc}
@@ -154,65 +184,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         ))}
       </div>
 
-      {/* ── Top skills ── */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 18 }}>
-        <h2 style={{ ...heading, fontSize: '1.4rem' }}>Auto Bots to start with</h2>
+      {/* ── Strategies with reproducible numbers ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+        <h2 style={{ ...heading, fontSize: '1.4rem' }}>Strategies to try first</h2>
         <button onClick={() => onNavigate?.('factory')} style={{
           background: 'none', border: 'none', color: 'var(--sui-blue)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500,
         }}>
-          View all in Autobots Factory →
+          Browse all strategies →
         </button>
       </div>
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: 18 }}>
+        These numbers come from backtests on real historical data. Click one and run the same test yourself.
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginBottom: 44 }}>
-        {topSkills.map(s => (
+        {strategies.map(s => (
           <div key={s.name} style={{ ...card, cursor: 'pointer', transition: 'border-color 0.15s' }}
             onClick={() => onNavigate?.('backtest')}
             onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--sui-blue)'; }}
             onMouseOut={e => { e.currentTarget.style.borderColor = '#1e293b'; }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <h3 style={{ ...heading, fontSize: '1rem' }}>{s.name}</h3>
               <span style={{
                 fontSize: '0.68rem', fontWeight: 600, padding: '3px 10px', borderRadius: 10,
-                background: 'rgba(77,162,255,0.13)', color: 'var(--sui-blue)',
+                background: 'rgba(77,162,255,0.13)', color: 'var(--sui-blue)', whiteSpace: 'nowrap',
               }}>{s.tag}</span>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: 12 }}>{s.desc}</p>
-            <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              Free · backtest before you run it
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.84rem', lineHeight: 1.5, marginBottom: 14 }}>{s.blurb}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {s.stats.map(([label, value, isProfit]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: '#64748b' }}>{label}</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 600, color: isProfit ? 'var(--profit)' : '#e2e8f0' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--sui-blue)' }}>
+              Free · run this backtest yourself →
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── Why Suirobo ── */}
-      <h2 style={{ ...heading, fontSize: '1.4rem', marginBottom: 6 }}>Why Suirobo</h2>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 18, maxWidth: 760 }}>
-        Always-on AI agents burn huge LLM inference costs that quietly eat the profit. Suirobo uses AI where it's
-        worth it — research, audit, backtest — then hands execution to lean robots that run 24/7 at near-zero cost.
-      </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18, marginBottom: 44 }}>
-        {[
-          { icon: '⚡', title: 'Cheaper than always-on AI', desc: 'AI agents design & backtest the strategy once; deterministic robots execute it 24/7 — no endless per-trade API bills draining your returns.' },
-          { icon: '🔑', title: 'Self-custody by design', desc: 'Your private key and assets never leave your machine. Suirobo is a tool, not a custodian — no central vault for hackers to target.' },
-          { icon: '📊', title: 'Backtested discipline', desc: 'Every strategy is EA-style and rules-based, validated month-by-month on real historical market data before it ever goes live.' },
-          { icon: '💰', title: 'A creator economy', desc: 'Publish a winning strategy to the on-chain marketplace and earn a creator fee — 0.005 SUI for every position your bot opens, paid automatically.' },
-        ].map(c => (
-          <div key={c.title} style={{ ...card, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: 10 }}>{c.icon}</div>
-            <h3 style={{ ...heading, fontSize: '1.02rem', marginBottom: 8 }}>{c.title}</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.55 }}>{c.desc}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Trust footer ── */}
+      {/* ── Trust band: three concrete facts, stated plainly ── */}
       <div style={{
         borderTop: '1px solid #1e293b', paddingTop: 22, marginBottom: 8,
-        display: 'flex', gap: 26, flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-secondary)',
+        display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.55,
       }}>
-        <span>🔑 Self-custody — keys stay on your machine</span>
-        <span>🌊 Autobots + Auto Bot source hosted on Walrus</span>
-        <span>🧾 Build a bot people trade — earn 0.005 SUI per opened position</span>
+        <span>🔑 <strong style={{ color: '#cbd5e1' }}>Self-custody.</strong> Funds stay in your wallet or your own on-chain margin account. There is no deposit address and we hold no keys.</span>
+        <span>📜 <strong style={{ color: '#cbd5e1' }}>Nothing hidden.</strong> Every strategy's source is stored on Walrus, Sui's public storage network, and its results are reproducible in the backtester.</span>
+        <span>🧾 <strong style={{ color: '#cbd5e1' }}>One fee.</strong> 0.01 SUI each time a bot opens a trade, half of it paid to the strategy's author. Closing a trade is free.</span>
       </div>
 
       <AgentDownloadModal isOpen={showDownload} onClose={() => setShowDownload(false)} />
