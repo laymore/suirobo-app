@@ -81,7 +81,23 @@ Because a trading bot needs three things a general-purpose chain rarely offers t
 
 Strategically, bots are the kind of user a young order book wants most: they trade around the clock and generate consistent volume. Autobots grows **with** the DeepBook and Sui ecosystem, not against it.
 
-## Objection 7: "Retail users will never trust it enough to start."
+## Objection 7: "Why trade on a DEX at all? CEXs have deeper liquidity."
+
+Invert the question: instead of asking what a CEX does better, list what a CEX **cannot do at any price** — because each impossibility is a feature this product is built on.
+
+| A DEX bot can… | Why a CEX bot never can |
+|---|---|
+| **Execute multi-step trades atomically.** Borrow, trade, and pay the strategy fee in ONE transaction: it all happens, or none of it does. This enables *profit-or-revert* operations (roadmap): a trade that asserts its own minimum outcome and cancels itself otherwise, losing only gas. | A CEX bot chains sequential API calls. Any leg can fail halfway, leaving a broken position. There is no such thing as an atomic "this trade only exists if it's profitable". |
+| **Prove its results.** Every fill is a public transaction digest; a track record is evidence, not a screenshot. | CEX trade history is a private database row. Performance marketing in that world is unfalsifiable, which is exactly why it's full of fakes. |
+| **Read the venue's ground truth directly.** The full order book and every fill are public chain data. Our candles come from DeepBook's own fill-tape; liquidation thresholds are on-chain constants anyone can read (SUI/USDC: 1.10). | A CEX bot sees only what the exchange's rate-limited API chooses to show. Liquidation engines and ADL rules are opaque, and the operator can trade against its own users with zero visibility. |
+| **Survive its venue's failure.** Self-custody means there is no FTX scenario: no frozen withdrawals, no bankruptcy claim, no commingled funds. If every Autobots server disappeared tomorrow, user funds sit untouched in user wallets. | CEX custody IS the product. Every CEX bot user is an unsecured creditor of the exchange, every day. |
+| **Run without permission.** No API key to revoke, no account to ban, no region lock. The bot's right to trade is a property of the chain, not a privilege granted by a company. | A CEX can deplatform any bot, any time, for any reason — and routinely changes API terms that break them. |
+| **Enforce its own rules in code.** Creator royalties are paid by a contract, not by an honor system; hard risk limits can live in a Move contract the bot is physically unable to exceed. | On a CEX, every such rule is a terms-of-service promise, enforceable only by lawyers. |
+| **Compose with everything else on the chain.** A bot's output can flow into lending, LPs, or any other protocol in the same transaction. | A CEX is a walled garden; value leaves only through a withdrawal queue. |
+
+The honest counterpoint: today a large CEX still has deeper books and lower latency. Two answers. First, this product's strategies are candle-based (minutes, not microseconds) — they compete on discipline and cost, not on latency, so CEX speed buys nothing here. Second, the liquidity gap is precisely the opportunity: on-chain CLOBs are where equities were before electronic trading matured, and bots that generate steady volume are part of how that gap closes. Being early to the venue is the point, not the problem.
+
+## Objection 8: "Retail users will never trust it enough to start."
 
 Onboarding is a trust ladder in which commitment is earned one step at a time:
 
