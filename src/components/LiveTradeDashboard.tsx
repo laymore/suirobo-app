@@ -1095,6 +1095,15 @@ export const LiveTradeDashboard: React.FC<LiveTradeProps> = ({ onOpenManualTrade
               </span>
             );
           })()}
+          {(s as any).dataStale && (
+            <span title="The newest candle is too old — the data feed is frozen or the source is down. New entries are paused; exits stay armed. Clears automatically when fresh data returns."
+              style={{
+                fontSize: '0.62rem', fontWeight: 800, padding: '3px 8px', borderRadius: 5,
+                background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.4)',
+              }}>
+              🚱 Data stale · entries paused
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

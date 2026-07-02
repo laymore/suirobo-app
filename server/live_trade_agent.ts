@@ -151,6 +151,7 @@ interface BotState {
   mode:           'agent' | 'direct';
   riskRatio:      number | null;  // DeepBook margin risk ratio while in a position (null = flat/unknown)
   liqThreshold:   number;          // protocol liquidationRiskRatio for the pool (e.g. 1.1)
+  dataStale:      boolean;         // P4-R2: market data too old → new entries paused (exits stay armed)
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ const state: BotState = {
   lastIndicators: { rsi: 50, ema9: 0, ema21: 0, macdHist: 0, bbUpper: 0, bbLower: 0 },
   tradeCount: 0, totalPnl: 0, logs: [],
   lastUpdate: '', pollInterval: 30_000, mode: 'agent',
-  riskRatio: null, liqThreshold: 0,
+  riskRatio: null, liqThreshold: 0, dataStale: false,
 };
 
 // Lưu riêng private key trong memory, không vào state
@@ -396,7 +397,7 @@ async function fetchCandles(pair: string, tf: string, limit = 120): Promise<Cand
   const symbol   = pairAssets(pair).binanceSymbol;
   const interval = tf || '15m';
   const url      = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-  const res  = await (fetch as any)(url);
+  const res  = await (fetch as any)(url, { signal: AbortSignal.timeout(10_000) });
   const data = await res.json() as any[];
   if (!Array.isArray(data)) throw new Error('Binance data invalid');
   return data.map((k: any[]) => ({
@@ -426,6 +427,7 @@ async function getCandles(cfg: LiveBotConfig, limit: number): Promise<Candle[]> 
       }
       return _onchainFeed.candles(cfg.timeframe);
     } catch (e: any) {
+      noteRpcError('on-chain candles');
       addLog('warning', `📡 On-chain feed error: ${e?.message || e}`);
       return _onchainFeed ? _onchainFeed.candles(cfg.timeframe) : [];
     }
@@ -435,11 +437,29 @@ async function getCandles(cfg: LiveBotConfig, limit: number): Promise<Candle[]> 
 
 // ─── Sui Client (lazy-init) ───────────────────────────────────────────────────
 
-const MAINNET_RPC = 'https://fullnode.mainnet.sui.io';
+// P4-R2: multi-RPC failover. One flaky fullnode must never blind the bot — after
+// a few consecutive on-chain read failures we rotate to the next public endpoint
+// (and drop dependent cached clients so they re-resolve on the new node).
+const RPC_URLS = [
+  'https://fullnode.mainnet.sui.io',
+  'https://sui-rpc.publicnode.com',
+  'https://sui-mainnet.public.blastapi.io',
+];
+let _rpcIdx = 0;
+let _rpcErrStreak = 0;
 let _suiClient: SuiJsonRpcClient | null = null;
 function getSuiClient() {
-  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: MAINNET_RPC, network: 'mainnet' as any });
+  if (!_suiClient) _suiClient = new SuiJsonRpcClient({ url: RPC_URLS[_rpcIdx], network: 'mainnet' as any });
   return _suiClient;
+}
+function noteRpcOk() { _rpcErrStreak = 0; }
+function noteRpcError(where: string) {
+  if (++_rpcErrStreak < 3) return;   // tolerate transient blips
+  _rpcErrStreak = 0;
+  _rpcIdx = (_rpcIdx + 1) % RPC_URLS.length;
+  _suiClient = null;
+  resetHealthCache();                // health db client is bound to the old node
+  addLog('warning', `📡 RPC errors (${where}) — switched fullnode to ${RPC_URLS[_rpcIdx]}`);
 }
 
 function getKeypair(privateKey: string): Ed25519Keypair {
@@ -522,8 +542,10 @@ async function readMarginHealth(address: string): Promise<{ riskRatio: number; l
     }
     const st = await _healthDbClient.getMarginManagerState(_healthManagerKey);
     const riskRatio = Number(st?.riskRatio) || 0;
+    noteRpcOk();
     return { riskRatio, liqThreshold: _liqThreshold };
   } catch {
+    noteRpcError('margin health');
     resetHealthCache();   // stale manager id → re-resolve next time
     return null;
   }
@@ -1100,6 +1122,7 @@ function liveManage(cfg: LiveBotConfig, price: number, opposite: { buy: boolean;
 /** EA entry filters: session window, cooldown, loss streak, daily loss cap.
  *  Returns a human-readable block reason, or null when entries are allowed. */
 function entryBlockReason(cfg: LiveBotConfig): string | null {
+  if (state.dataStale) return 'market data stale — entries paused (P4-R2 watchdog)';
   if (!inSession(Date.now(), cfg)) return `outside session ${cfg.sessionStartHour}–${cfg.sessionEndHour}h UTC`;
 
   const tfMs = TF_MS[cfg.timeframe] || 900_000;
@@ -1139,6 +1162,24 @@ async function tradingTick() {
     const candles = await getCandles(cfg, lookback);
     candlesCache = candles; // expose to the UI chart — same data the bot trades on
     if (candles.length < 36) { addLog('warning', `Not enough data (${candles.length} candles)`); return; }
+    noteRpcOk();   // a full candle read counts as a healthy data path
+
+    // P4-R2 data-integrity watchdog: never ENTER on stale data. If the newest
+    // candle is older than ~2.5 bars (+1 min grace), the feed is frozen or the
+    // source is down — pause new entries but keep managing/exiting the open
+    // position (exits use the same last-known data, which is still the best we
+    // have for protecting an existing position).
+    {
+      const tfMin  = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 }[cfg.timeframe] ?? 5;
+      const lastTs = new Date(candles[candles.length - 1].date).getTime();
+      const stale  = Number.isFinite(lastTs) && (Date.now() - lastTs) > (2.5 * tfMin * 60_000 + 60_000);
+      if (stale && !state.dataStale) {
+        addLog('warning', `🚱 Market data is stale (newest candle ${Math.round((Date.now() - lastTs) / 60_000)} min old) — new entries are paused until fresh data returns; exits stay armed.`);
+      } else if (!stale && state.dataStale) {
+        addLog('info', '💧 Market data is fresh again — entries re-enabled.');
+      }
+      state.dataStale = stale;
+    }
 
     // MTF warmup transparency: while the HTF Supertrend hasn't seen enough
     // higher-timeframe buckets, every signal is gated to HOLD — tell the user
@@ -1279,7 +1320,8 @@ async function reconcilePosition(trigger: 'start' | 'tick'): Promise<void> {
     } else if (state.position && chainHasPosition) {
       orphanDebtWarned = false;   // in sync
     }
-  } catch { /* RPC hiccup — the next pass retries */ }
+    noteRpcOk();
+  } catch { noteRpcError('reconcile'); /* the next pass retries */ }
 }
 
 // ticker price and run TP/SL/breakeven/trailing — never entries (those stay
