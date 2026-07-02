@@ -964,8 +964,8 @@ async function openPosition(cfg: LiveBotConfig, type: 'LONG' | 'SHORT', price: n
 // ─── Close Position ───────────────────────────────────────────────────────────
 
 async function closePosition(reason: ExitReason | 'Manual', exitPrice: number) {
-  lastExitAt = Date.now();   // EA cooldownBars reference
   if (!state.position || !state.config) return;
+  lastExitAt = Date.now();   // EA cooldownBars reference — only when a position actually closes
   const pos = state.position;
   const cfg = state.config as LiveBotConfig;
 
@@ -1054,6 +1054,7 @@ let manageTimer:  ReturnType<typeof setInterval> | null = null;
 // EA bookkeeping (per bot run)
 let lastSignalBar = '';   // ISO date of the closed bar the last entry fired on
 let lastExitAt    = 0;    // Date.now() of the last closed trade (cooldownBars)
+let htfWarmupNoticed = false;  // one-shot per run: MTF warmup transparency log
 let dailyLossTrippedDay = '';   // UTC date the daily-loss circuit breaker fired (one-shot/day)
 
 /** Today's REALIZED P&L as a sum of closed-trade percents (UTC day).
@@ -1127,6 +1128,10 @@ async function tradingTick() {
   if (!state.active || !state.config) return;
   const cfg = state.config as LiveBotConfig;
 
+  // P4-R1: the chain is the truth — before acting, make sure the local position
+  // matches the MarginManager (throttled internally to ~5 min).
+  await reconcilePosition('tick');
+
   try {
     // MTF filter needs a deep history so the HTF Supertrend has warmed up
     // (e.g. H4 ST(10) on M5 ⇒ ≥ 11 closed H4 buckets ⇒ ≥ 528 M5 bars).
@@ -1134,6 +1139,18 @@ async function tradingTick() {
     const candles = await getCandles(cfg, lookback);
     candlesCache = candles; // expose to the UI chart — same data the bot trades on
     if (candles.length < 36) { addLog('warning', `Not enough data (${candles.length} candles)`); return; }
+
+    // MTF warmup transparency: while the HTF Supertrend hasn't seen enough
+    // higher-timeframe buckets, every signal is gated to HOLD — tell the user
+    // once instead of looking silently dead. (T10 from the trading audit.)
+    if (cfg.htfMinutes && !htfWarmupNoticed) {
+      const tfMin = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 }[cfg.timeframe] ?? 5;
+      const neededBars = Math.ceil(((cfg.htfSupertrendPeriod ?? 10) + 1) * (cfg.htfMinutes / tfMin));
+      if (candles.length < neededBars) {
+        addLog('info', `⏳ Trend filter warming up: has ${candles.length}/${neededBars} candles — entries stay off until the higher-timeframe trend is established.`);
+      }
+      htfWarmupNoticed = true;
+    }
 
     // MT-style OnBar: signals are evaluated on CLOSED candles only (the last
     // Binance kline is still forming — using it repaints and double-fires).
@@ -1224,6 +1241,47 @@ async function tradingTick() {
 
 // ─── Fast management sub-loop (10s) ──────────────────────────────────────────
 // MT EAs manage stops on every tick. Between candle polls we fetch just the
+// ─── P4-R1: Chain-is-truth reconciliation ─────────────────────────────────────
+// The most dangerous failure class for a 24/7 bot is its local memory disagreeing
+// with the chain (crash, killed process, position closed elsewhere): bot_state.json
+// is a CACHE — the MarginManager's debt is the truth.
+//   • local position but no on-chain debt  → drop the phantom (bot goes flat)
+//   • no local position but on-chain debt  → NEVER touch it automatically (it may
+//     be the user's own manual position); warn loudly instead.
+// Runs once at bot start and every ~5 min while active (direct SUI/USDC mode only).
+const RECONCILE_MS = 5 * 60_000;
+const DEBT_DUST = 0.5;              // debt below 0.5 SUI / 0.5 USDC = residual, not a position
+let lastReconcileAt = 0;
+let orphanDebtWarned = false;
+
+async function reconcilePosition(trigger: 'start' | 'tick'): Promise<void> {
+  const cfg = state.config as LiveBotConfig | null;
+  if (!cfg || state.mode !== 'direct' || !cfg.walletAddress) return;
+  if (isXbtcPair(cfg.pair)) return;                 // margin-debt reconcile is SUI/USDC only
+  if (trigger === 'tick' && Date.now() - lastReconcileAt < RECONCILE_MS) return;
+  lastReconcileAt = Date.now();
+  try {
+    const { dbClient, managerKey } = await getDbClientWithManager(cfg.walletAddress);
+    const d: any = await dbClient.getMarginManagerDebts(managerKey);
+    const baseDebt  = parseFloat(d?.baseDebt  ?? '0') || 0;
+    const quoteDebt = parseFloat(d?.quoteDebt ?? '0') || 0;
+    const chainHasPosition = baseDebt > DEBT_DUST || quoteDebt > DEBT_DUST;
+
+    if (state.position && !chainHasPosition) {
+      addLog('warning', `🔄 Reconcile: local ${state.position.type} position has no matching on-chain debt (closed elsewhere or stale state) — cleared it, the bot is flat again.`);
+      state.position = null;
+      persistState();
+      broadcastState();
+    } else if (!state.position && chainHasPosition && !orphanDebtWarned) {
+      orphanDebtWarned = true;
+      const what = baseDebt > DEBT_DUST ? `${baseDebt.toFixed(2)} SUI` : `${quoteDebt.toFixed(2)} USDC`;
+      addLog('warning', `⚠ Reconcile: on-chain margin debt of ${what} exists but the bot holds no position. The bot will NOT touch it — if it isn't yours on purpose, close it in Manual Trade.`);
+    } else if (state.position && chainHasPosition) {
+      orphanDebtWarned = false;   // in sync
+    }
+  } catch { /* RPC hiccup — the next pass retries */ }
+}
+
 // ticker price and run TP/SL/breakeven/trailing — never entries (those stay
 // on closed bars). Keeps exits tight even on 30m/1h timeframes.
 async function managementTick() {
@@ -1286,6 +1344,7 @@ export const liveBotController = {
     }
     resetHealthCache();   // wallet/manager may have changed → re-resolve on next health read
     _onchainFeed = null;  // re-bootstrap the on-chain candle feed for the new run
+    htfWarmupNoticed = false;  // re-announce MTF warmup for the new run
     state.config       = safeCfg;
     // Direct mode if explicitly requested (fallback to agent if not requested).
     // We don't silently fallback to agent mode if a key is missing, because
@@ -1306,6 +1365,8 @@ export const liveBotController = {
     state.active = true;
     lastSignalBar = '';   // reset EA new-bar gate per run
     dailyLossTrippedDay = '';   // a manual (re)start clears the daily-loss breaker
+    lastReconcileAt = 0;  // P4-R1: force a fresh chain-vs-local reconcile this run
+    orphanDebtWarned = false;
     addLog('info', `🚀 Bot started [${state.mode.toUpperCase()} MODE]: ${state.config.botSkillName}`);
     if (state.mode === 'direct') addLog('info', '⚡ DIRECT MODE — the bot signs and executes orders itself, no confirmation needed');
     broadcastState();
