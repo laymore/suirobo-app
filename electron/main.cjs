@@ -9,7 +9,7 @@
  *      it in the window. A preload flag trims the UI to Trade + Backtest + My Bot.
  *   3. Auto-accepts the localhost self-signed cert so there's no manual step.
  */
-const { app, BrowserWindow, shell, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, safeStorage, Notification } = require('electron');
 const { fork } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -35,6 +35,22 @@ let agentProc = null;
 let staticServer = null;
 let win = null;
 let agentLogFd = null;
+
+// ── P4-R4 dead-man switch state ──
+// A 24/7 bot must never die silently: if the agent process exits it is restarted
+// with backoff; if it is alive but unresponsive the health watchdog kills it (the
+// exit handler then restarts it); repeated fast failures give up + notify natively.
+let quitting = false;
+let lastAgentStartAt = 0;
+let fastRestartCount = 0;
+const MAX_FAST_RESTARTS = 3;      // give up after 3 crashes within a minute of boot
+const FAST_WINDOW_MS = 60_000;
+let healthTimer = null;
+let healthFails = 0;
+
+function notifyUser(title, body) {
+  try { new Notification({ title, body }).show(); } catch { /* headless/CI */ }
+}
 
 // ── Persistent wallet key, stored in the app's per-user data dir ──
 // Encrypted at rest with Electron safeStorage (DPAPI on Windows / Keychain on
@@ -113,7 +129,8 @@ async function startAgent() {
   // ships no secrets (per policy) — it runs the agent from userData and relies on
   // the injected wallet key + safe defaults.
   const agentCwd = PACKAGED ? app.getPath('userData') : ROOT;
-  agentProc = fork(AGENT_BUNDLE, [], {
+  lastAgentStartAt = Date.now();
+  const child = fork(AGENT_BUNDLE, [], {
     cwd: agentCwd,
     windowsHide: true,
     env: {
@@ -124,7 +141,61 @@ async function startAgent() {
     },
     stdio: ['ignore', agentLogFd, agentLogFd, 'ipc'],
   });
-  agentProc.on('exit', (code) => console.log('[suirobo] agent exited:', code));
+  agentProc = child;
+  child.on('exit', (code) => {
+    console.log('[autobots] agent exited:', code);
+    // Deliberate restart/shutdown paths null agentProc BEFORE killing — in that
+    // case someone else owns the reboot and we must not double-start.
+    if (agentProc !== child) return;
+    agentProc = null;
+    if (quitting) return;
+
+    // P4-R4: auto-restart with backoff. A crash within a minute of boot counts
+    // as "fast"; after 3 fast crashes in a row give up + tell the user natively.
+    const fastCrash = Date.now() - lastAgentStartAt < FAST_WINDOW_MS;
+    fastRestartCount = fastCrash ? fastRestartCount + 1 : 1;
+    if (fastRestartCount > MAX_FAST_RESTARTS) {
+      console.error('[autobots] dead-man switch: agent keeps crashing — giving up on auto-restart');
+      notifyUser('Autobots agent is DOWN',
+        'The trading agent crashed repeatedly and auto-restart gave up. Your bot is NOT running. Restart the app and check the logs.');
+      return;
+    }
+    const delay = 2_000 * fastRestartCount;
+    console.log(`[autobots] dead-man switch: restarting the agent in ${delay}ms (attempt ${fastRestartCount}/${MAX_FAST_RESTARTS})`);
+    setTimeout(() => { if (!quitting && !agentProc) startAgent(); }, delay);
+  });
+}
+
+// P4-R4: liveness beyond "the process exists" — a hung agent (event loop wedged,
+// port dead) answers no /health. 3 misses in a row (~90s) → kill it; the exit
+// handler above does the restart + backoff accounting. Fresh boots get a grace
+// minute so slow startups aren't murdered.
+function startHealthWatchdog() {
+  if (healthTimer) return;
+  healthTimer = setInterval(() => {
+    if (quitting || !agentProc) return;                       // exit handler owns dead processes
+    if (Date.now() - lastAgentStartAt < 60_000) return;       // boot grace
+    const req = http.get({ host: '127.0.0.1', port: 3001, path: '/health', timeout: 5_000 }, (res) => {
+      res.resume();
+      if (res.statusCode === 200) {
+        if (healthFails >= 3) notifyUser('Autobots agent recovered', 'The trading agent is responding again.');
+        healthFails = 0;
+        fastRestartCount = 0;                                 // healthy run resets the give-up counter
+      } else {
+        onHealthMiss();
+      }
+    });
+    req.on('error', onHealthMiss);
+    req.on('timeout', () => { req.destroy(); onHealthMiss(); });
+  }, 30_000);
+}
+function onHealthMiss() {
+  healthFails++;
+  if (healthFails < 3) return;
+  healthFails = 0;
+  console.error('[autobots] dead-man switch: agent unresponsive 3× — force-restarting it');
+  notifyUser('Autobots agent hung', 'The agent stopped responding and is being restarted. A running bot resumes automatically.');
+  try { agentProc && agentProc.kill(); } catch { /* exit handler restarts */ }
 }
 
 function restartAgent() {
@@ -190,7 +261,9 @@ app.on('certificate-error', (event, _wc, url, _err, _cert, callback) => {
 });
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId('app.autobots.desktop');   // Windows toast notifications
   await startAgent();
+  startHealthWatchdog();                            // P4-R4 dead-man switch
   let url = `http://127.0.0.1:${STATIC_PORT}/`;
   try { url = await serveDist(); } catch (e) { console.error('[suirobo] static server failed', e); }
 
@@ -222,6 +295,8 @@ app.whenReady().then(async () => {
 });
 
 function cleanup() {
+  quitting = true;                                            // dead-man switch stands down
+  if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
   try { agentProc && agentProc.kill(); } catch {}
   try { staticServer && staticServer.close(); } catch {}
 }

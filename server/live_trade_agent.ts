@@ -188,6 +188,7 @@ function isValidPosition(p: any): boolean {
     && typeof p.borrowAmount === 'number' && isFinite(p.borrowAmount);
 }
 
+let _wasActiveBeforeRestart = false;   // P4-R4: the bot was RUNNING when the agent died
 try {
   if (fs.existsSync(STATE_FILE)) {
     const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -197,6 +198,7 @@ try {
     state.totalPnl   = Number.isFinite(saved.totalPnl)   ? saved.totalPnl   : 0;
     state.config     = saved.config ?? null;
     state.mode       = saved.mode   ?? 'agent';
+    _wasActiveBeforeRestart = compatible && saved.active === true;
     if (!compatible && saved.position) {
       console.log('[bot_state] schema changed — dropped a stale saved position (started flat)');
     }
@@ -208,10 +210,31 @@ function persistState() {
     // ⚠️  Never write the privateKey to disk.
     fs.writeFileSync(STATE_FILE, JSON.stringify({
       version: STATE_VERSION,
+      active: state.active,           // P4-R4: lets a restarted agent resume the bot
       position: state.position, tradeCount: state.tradeCount,
       totalPnl: state.totalPnl, config: state.config, mode: state.mode,
     }));
   } catch { /* ignore */ }
+}
+
+// P4-R4 auto-resume: if the agent died (crash / hung-kill by the desktop watchdog)
+// while the user's bot was RUNNING, resume it — a user-started bot carries the
+// user's standing authorization, and abandoning an open position unmanaged is the
+// dangerous outcome. Direct mode only (needs the env-injected key); the first
+// tradingTick then runs the P4-R1 chain reconcile before acting. A bot the user
+// STOPPED persists active:false and is never resumed.
+if (_wasActiveBeforeRestart) {
+  setTimeout(() => {
+    try {
+      if (state.active || !state.config) return;
+      if (state.mode === 'direct' && !_cachedPrivateKey) {
+        addLog('warning', '🔁 The bot was running before the agent restarted, but no signing key is available — NOT resuming. Start it again from Live Trade.');
+        return;
+      }
+      addLog('info', '🔁 Agent restarted while the bot was running — resuming it (chain reconcile runs first).');
+      liveBotController.start();
+    } catch { /* leave stopped */ }
+  }, 8_000);   // let the HTTP/WS servers finish booting first
 }
 
 // ─── Candles cache + Trade History ────────────────────────────────────────────
@@ -1409,6 +1432,7 @@ export const liveBotController = {
     dailyLossTrippedDay = '';   // a manual (re)start clears the daily-loss breaker
     lastReconcileAt = 0;  // P4-R1: force a fresh chain-vs-local reconcile this run
     orphanDebtWarned = false;
+    persistState();       // P4-R4: record active:true so a crashed agent resumes the bot
     addLog('info', `🚀 Bot started [${state.mode.toUpperCase()} MODE]: ${state.config.botSkillName}`);
     if (state.mode === 'direct') addLog('info', '⚡ DIRECT MODE — the bot signs and executes orders itself, no confirmation needed');
     broadcastState();
@@ -1429,6 +1453,7 @@ export const liveBotController = {
     state.active = false;
     if (pollingTimer) { clearTimeout(pollingTimer); pollingTimer = null; }
     if (manageTimer)  { clearInterval(manageTimer); manageTimer = null; }
+    persistState();     // P4-R4: record active:false — a user-stopped bot is NEVER auto-resumed
     addLog('info', '⏹ Bot stopped');
     broadcastState();
   },
