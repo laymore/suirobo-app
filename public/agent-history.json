@@ -2,6 +2,22 @@
   {
     "name": "Autobots",
     "publisher": "Team Autobots",
+    "version": "1.2.0",
+    "built_at": "2026-07-02T00:00:00.000Z",
+    "size_bytes": 117261441,
+    "size_mb": 111.83,
+    "sha256": "4c48e593650b3ed104bcb45a504a9227e4f1c12fddf315a0acdc2603a09a258c",
+    "platform": "win-x64",
+    "node_version": "portable",
+    "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
+    "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.2.0/Autobots-desktop-v1.2.0.zip",
+    "published_at": "2026-07-02T00:00:00.000Z",
+    "epochs": 50,
+    "changelog": "The safety trio: chain-is-truth position reconcile, stale-data watchdog + multi-RPC failover, and a dead-man switch with bot auto-resume."
+  },
+  {
+    "name": "Autobots",
+    "publisher": "Team Autobots",
     "version": "1.1.1",
     "built_at": "2026-06-28T00:00:00.000Z",
     "size_bytes": 117263538,

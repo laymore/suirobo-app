@@ -1,18 +1,18 @@
 {
   "name": "Autobots",
   "publisher": "Team Autobots",
-  "version": "1.1.1",
-  "built_at": "2026-06-28T00:00:00.000Z",
+  "version": "1.2.0",
+  "built_at": "2026-07-02T00:00:00.000Z",
   "format": "zip",
-  "filename": "Autobots-desktop-v1.1.1.zip",
-  "size_bytes": 117263538,
+  "filename": "Autobots-desktop-v1.2.0.zip",
+  "size_bytes": 117261441,
   "size_mb": 111.83,
-  "sha256": "f0cee6e15ab070dda8c280770e8d314878d9e7c34365db2fccd13128e5fe24a8",
+  "sha256": "4c48e593650b3ed104bcb45a504a9227e4f1c12fddf315a0acdc2603a09a258c",
   "platform": "win-x64",
   "node_version": "portable",
-  "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.1.1/Autobots-desktop-v1.1.1.zip",
+  "download_url": "https://github.com/laymore/suirobo-agent/releases/download/v1.2.0/Autobots-desktop-v1.2.0.zip",
   "blob_id": "pTvsZP8lm-H4FclIkQx0kb7_GzpkualzD7D5VwheWz8",
-  "published_at": "2026-06-28T00:00:00.000Z",
+  "published_at": "2026-07-02T00:00:00.000Z",
   "epochs": 50,
-  "changelog": "Security hardening (from an external audit): desktop wallet key encrypted at rest with OS-level safeStorage/DPAPI (legacy keys auto-migrate); no API key can leak into the public bundle; bot_state versioned + position validated on load; Electron opens only http/https links. Plus the full Sui-native data spine, pro backtest toolkit, and hard safety interlocks."
+  "changelog": "The safety trio: chain-is-truth reconcile (the bot verifies its position against the DeepBook MarginManager's real debt and drops stale phantoms), a data-integrity watchdog (entries pause on stale candles; the agent rotates across 3 public Sui fullnodes on read failures), and a dead-man switch (a crashed or hung agent auto-restarts and a running bot auto-resumes, reconciling with the chain first; repeated failures fire a native notification). Plus: DevTools disabled in the packaged app, Sharpe annualised for 24/7 markets, and an honest backtest-model disclosure."
 }
